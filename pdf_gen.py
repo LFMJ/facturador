@@ -5,6 +5,7 @@ cliente, tabla de artículos y totales.
 """
 import io
 import datetime
+from xml.sax.saxutils import escape
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import mm
@@ -18,6 +19,11 @@ INK = colors.HexColor("#16233A")
 INK_SOFT = colors.HexColor("#3C4A5E")
 BRASS = colors.HexColor("#7C5F2C")
 LINE = colors.HexColor("#E1DFD8")
+
+
+def _t(value) -> str:
+    """Escapa texto del usuario para Paragraph (que interpreta <, > y & como marcado)."""
+    return escape(str(value or ""))
 
 
 def fmt_money(value, currency="$"):
@@ -84,15 +90,15 @@ def generate_invoice_pdf(invoice: dict, company: dict, output_path: str):
             left_cell.append(Spacer(1, 4))
         except Exception:
             pass
-    left_cell.append(Paragraph(company.get("name") or "Empresa", style_co_name))
+    left_cell.append(Paragraph(_t(company.get("name") or "Empresa"), style_co_name))
     co_lines = [l for l in [company.get("tax_id"), company.get("address"),
                              " · ".join([x for x in [company.get("phone"), company.get("email")] if x])] if l]
     for l in co_lines:
-        left_cell.append(Paragraph(l, style_co_meta))
+        left_cell.append(Paragraph(_t(l), style_co_meta))
 
     right_cell = [
         Paragraph("FACTURA", style_title),
-        Paragraph(invoice.get("number", ""), style_meta),
+        Paragraph(_t(invoice.get("number", "")), style_meta),
         Paragraph(format_date_es(invoice.get("created_at") or datetime.datetime.now()), style_meta),
     ]
 
@@ -114,10 +120,10 @@ def generate_invoice_pdf(invoice: dict, company: dict, output_path: str):
         " · ".join([x for x in [invoice.get("client_phone"), invoice.get("client_email")] if x])
     ] if l]
     for l in client_lines:
-        story.append(Paragraph(l, style_body))
+        story.append(Paragraph(_t(l), style_body))
     if invoice.get("seller"):
         story.append(Spacer(1, 4))
-        story.append(Paragraph(f"Atendido por: {invoice['seller']}", style_co_meta))
+        story.append(Paragraph(f"Atendido por: {_t(invoice['seller'])}", style_co_meta))
     story.append(Spacer(1, 16))
 
     # --- Tabla de artículos ---
@@ -146,11 +152,11 @@ def generate_invoice_pdf(invoice: dict, company: dict, output_path: str):
         line_total = line_gross * (1 - discount / 100)
         gross += line_gross
         discount_total += line_gross - line_total
-        row_cells = [Paragraph(str(it.get("description", "—")), style_td), Paragraph(f"{qty:g}", style_td_r),
-                     Paragraph(fmt_money(price, currency), style_td_r)]
+        row_cells = [Paragraph(_t(it.get("description") or "—"), style_td), Paragraph(f"{qty:g}", style_td_r),
+                     Paragraph(_t(fmt_money(price, currency)), style_td_r)]
         if has_discount:
             row_cells.append(Paragraph(f"{discount:g}%" if discount else "—", style_td_r))
-        row_cells.append(Paragraph(fmt_money(line_total, currency), style_td_r))
+        row_cells.append(Paragraph(_t(fmt_money(line_total, currency)), style_td_r))
         rows.append(row_cells)
 
     items_table = Table(rows, colWidths=col_widths)
@@ -170,7 +176,8 @@ def generate_invoice_pdf(invoice: dict, company: dict, output_path: str):
     tax_rate = float(invoice.get("tax_rate") or 0)
     tax_amount = net * (tax_rate / 100)
     total = net + tax_amount
-    tax_label = company.get("tax_label") or "Impuesto"
+    tax_label = _t(company.get("tax_label") or "Impuesto")
+    currency = _t(currency)
 
     totals_rows = []
     if discount_total > 0:
@@ -196,7 +203,7 @@ def generate_invoice_pdf(invoice: dict, company: dict, output_path: str):
     if invoice.get("warranty"):
         story.append(Spacer(1, 16))
         story.append(Paragraph("GARANTÍA", style_label))
-        story.append(Paragraph(invoice["warranty"], style_footer))
+        story.append(Paragraph(_t(invoice["warranty"]), style_footer))
 
     notes = invoice.get("notes") or ""
     footer_note = company.get("footer_note") or ""
@@ -205,8 +212,8 @@ def generate_invoice_pdf(invoice: dict, company: dict, output_path: str):
         story.append(HRFlowable(width="100%", thickness=0.6, color=LINE))
         story.append(Spacer(1, 8))
         if notes:
-            story.append(Paragraph(notes, style_footer))
+            story.append(Paragraph(_t(notes), style_footer))
         if footer_note:
-            story.append(Paragraph(footer_note, style_footer))
+            story.append(Paragraph(_t(footer_note), style_footer))
 
     doc.build(story)

@@ -7,6 +7,11 @@ historial de facturas. Todos los equipos que usen la app se conectan a un
 información está siempre centralizada y disponible desde cualquier lugar
 con internet.
 
+**Versión web:** el mismo servidor también sirve una versión web, así que
+cualquiera puede trabajar desde el **celular** o desde cualquier navegador
+entrando a `https://tuusuario.pythonanywhere.com` con la clave de API, sin
+instalar nada. App de escritorio y versión web comparten los mismos datos.
+
 ## 1. Desplegar el servidor (una sola vez, gratis)
 
 Sigue `server/DEPLOY.md` para desplegar `server/app.py` gratis en
@@ -69,7 +74,8 @@ facturador_app/
   tab_factura.py         pestaña "Nueva factura"
   tab_historial.py        pestaña "Historial"
   server/
-    app.py               API (Flask) — la parte que se despliega en internet
+    app.py               API (Flask) + versión web — la parte que se despliega en internet
+    static/index.html    versión web para celular/navegador (servida en "/")
     requirements.txt
     DEPLOY.md            instrucciones de despliegue gratis en PythonAnywhere
 ```
@@ -105,3 +111,13 @@ No hay que borrar nada: solo sube el nuevo `server/app.py` (reemplaza el
 viejo) a PythonAnywhere y dale "Reload" en la pestaña "Web". La primera vez
 que arranque, migra tu base de datos existente automáticamente (agrega las
 columnas nuevas sin borrar clientes, productos ni facturas que ya tenías).
+
+## 8. Versión web (celular)
+
+- Se abre en la URL del servidor (`https://tuusuario.pythonanywhere.com`),
+  pide la clave de API y tiene las mismas pestañas que la app de escritorio.
+- El PDF lo genera el servidor (`/api/invoices/<id>/pdf`); en el celular se
+  puede compartir directamente por WhatsApp/correo.
+- Para actualizar un servidor ya desplegado: sube `server/app.py`,
+  `server/static/` y `pdf_gen.py` (ver `server/DEPLOY.md`, paso 2) y dale
+  "Reload". No hay cambios en la base de datos.

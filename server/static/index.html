@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16233A">
+<title>Facturador</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<style>
+  :root {
+    --ink: #16233A; --ink-soft: #3C4A5E; --paper: #FDFCFA; --panel: #F5F4F0;
+    --line: #E1DFD8; --brass: #7C5F2C; --red: #A23B3B; --green: #2F6F4E; --card: #fff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink);
+    font: 16px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  h1, h2 { font-family: Georgia, "Times New Roman", serif; margin: 0; }
+  h2 { font-size: 1.35rem; }
+  .muted { color: var(--ink-soft); font-size: .9rem; }
+  .hidden { display: none !important; }
+
+  header.top { position: sticky; top: 0; z-index: 10; background: var(--ink); color: #fff;
+    padding: calc(10px + env(safe-area-inset-top)) 16px 0; }
+  header.top .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  header.top h1 { font-size: 1.2rem; }
+  header.top .logout { background: transparent; border: 1px solid #ffffff55; color: #fff;
+    border-radius: 6px; padding: 4px 10px; font-size: .85rem; cursor: pointer; }
+  nav.tabs { display: flex; gap: 4px; overflow-x: auto; margin-top: 8px; scrollbar-width: none; }
+  nav.tabs::-webkit-scrollbar { display: none; }
+  nav.tabs button { flex: 0 0 auto; background: transparent; border: 0; color: #ffffffb0;
+    padding: 10px 12px; border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; }
+  nav.tabs button.active { color: #fff; border-bottom-color: #C9A45C; font-weight: 600; }
+
+  main { max-width: 860px; margin: 0 auto; padding: 16px 16px 96px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
+  .toolbar input[type=search] { flex: 1 1 180px; }
+
+  label.f { display: block; margin-bottom: 12px; }
+  label.f > span { display: block; font-size: .85rem; color: var(--ink-soft); margin-bottom: 4px; }
+  input, select, textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+    background: #fff; min-height: 44px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid #C9A45C66; border-color: #C9A45C; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  @media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px;
+    padding: 0 16px; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+  .btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; font-weight: 600; }
+  .btn.danger { color: var(--red); border-color: #E7C3BE; }
+  .btn.small { min-height: 36px; padding: 0 12px; font-size: .9rem; }
+  .btn.block { width: 100%; }
+  .btn:disabled { opacity: .6; cursor: progress; }
+
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  ul.list li { display: flex; justify-content: space-between; gap: 10px; align-items: center;
+    padding: 12px 4px; border-bottom: 1px solid var(--line); }
+  ul.list li:last-child { border-bottom: 0; }
+  ul.list .main { min-width: 0; flex: 1; }
+  ul.list .title { font-weight: 600; overflow-wrap: anywhere; }
+  ul.list .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .empty { text-align: center; color: var(--ink-soft); padding: 28px 8px; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: .78rem; background: var(--panel); }
+  .badge.low { background: #FBEEEC; color: var(--red); }
+
+  .line-item { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 10px; background: #fff; }
+  .line-item .nums { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 8px; }
+  .line-item .nums label.f { margin-bottom: 0; }
+  .line-item .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+  .money { font-family: ui-monospace, Consolas, monospace; }
+  .totals { background: var(--panel); border-radius: 8px; padding: 12px 16px; margin: 14px 0; }
+  .totals div { display: flex; justify-content: space-between; padding: 3px 0; }
+  .totals .grand { font-weight: 700; font-size: 1.15rem; border-top: 1px solid var(--line); margin-top: 6px; padding-top: 8px; }
+  .errors { background: #FBEEEC; border: 1px solid #E7C3BE; color: #7A2E2E; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
+  .errors ul { margin: 6px 0 0; padding-left: 18px; }
+  .client-info { font-size: .9rem; color: var(--ink-soft); white-space: pre-line; margin: -4px 0 12px; }
+  .logo-prev { max-width: 180px; max-height: 80px; display: block; margin: 6px 0 10px; }
+
+  dialog { border: 0; border-radius: 12px; padding: 0; width: min(520px, calc(100vw - 24px)); max-height: calc(100vh - 40px); }
+  dialog::backdrop { background: #16233A88; }
+  dialog form { padding: 18px; }
+  dialog h2 { margin-bottom: 14px; }
+  dialog .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+
+  #toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 8px; max-width: calc(100vw - 32px);
+    box-shadow: 0 4px 16px #0003; z-index: 100; }
+  #toast.error { background: var(--red); }
+
+  #login { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  #login .card { width: 100%; max-width: 380px; }
+  #login h1 { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<section id="login" class="hidden">
+  <form class="card" id="login-form">
+    <h1>Facturador</h1>
+    <p class="muted">Ingresa la clave de acceso de tu empresa.</p>
+    <label class="f"><span>Clave de acceso</span>
+      <input type="password" id="login-key" autocomplete="current-password" required></label>
+    <div id="login-error" class="errors hidden"></div>
+    <button class="btn primary block" type="submit">Entrar</button>
+  </form>
+</section>
+
+<div id="app" class="hidden">
+  <header class="top">
+    <div class="row">
+      <h1 id="company-title">Facturador</h1>
+      <button class="logout" id="logout">Salir</button>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button data-tab="factura">Nueva factura</button>
+      <button data-tab="historial">Historial</button>
+      <button data-tab="productos">Productos</button>
+      <button data-tab="clientes">Clientes</button>
+      <button data-tab="proveedores">Proveedores</button>
+      <button data-tab="empresa">Mi empresa</button>
+    </nav>
+  </header>
+  <main id="view"></main>
+</div>
+
+<dialog id="modal"><form method="dialog" id="modal-form"></form></dialog>
+<div id="toast" class="hidden"></div>
+
+<script>
+"use strict";
+const KEY_STORAGE = "facturador_key";
+let apiKey = "";
+let company = {};
+let currentTab = "factura";
+
+// ---------- utilidades ----------
+const $ = (sel, root = document) => root.querySelector(sel);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const num = (v) => { const n = parseFloat(String(v ?? "").replace(",", ".")); return Number.isFinite(n) ? n : null; };
+const fmtNum = (n) => (n ?? 0).toLocaleString("es", { maximumFractionDigits: 3 });
+const money = (v) => `${company.currency || "$"} ${(Number(v) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmtDate = (ts) => ts ? new Date(ts * 1000).toLocaleDateString("es", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
+
+function storageGet() { try { return localStorage.getItem(KEY_STORAGE) || ""; } catch { return ""; } }
+function storageSet(v) { try { v ? localStorage.setItem(KEY_STORAGE, v) : localStorage.removeItem(KEY_STORAGE); } catch {} }
+
+let toastTimer;
+function toast(msg, error = false) {
+  const t = $("#toast");
+  t.textContent = msg; t.className = error ? "error" : "";
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add("hidden"), 3500);
+}
+
+class ApiError extends Error {}
+
+async function api(method, path, body, { raw = false } = {}) {
+  let r;
+  try {
+    r = await fetch(path, {
+      method,
+      headers: { "X-API-Key": apiKey, ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new ApiError("No se pudo conectar con el servidor. Revisa tu conexión a internet.");
+  }
+  if (r.status === 401) { logout("La clave de acceso no es correcta."); throw new ApiError("Clave incorrecta."); }
+  if (!r.ok) {
+    let detail = r.statusText;
+    try { detail = (await r.json()).error || detail; } catch {}
+    throw new ApiError(detail);
+  }
+  return raw ? r : r.json();
+}
+
+async function guarded(fn) {
+  try { return await fn(); }
+  catch (e) { toast(e.message || String(e), true); }
+}
+
+// ---------- modal genérico ----------
+// fields: [{name, label, type, required, options:[{value,label}], placeholder, step}]
+function openForm(title, fields, values = {}, submitLabel = "Guardar") {
+  return new Promise((resolve) => {
+    const dlg = $("#modal"), form = $("#modal-form");
+    form.innerHTML = `<h2>${esc(title)}</h2>` + fields.map((f) => {
+      const v = values[f.name] ?? f.default ?? "";
+      let input;
+      if (f.type === "select") {
+        input = `<select name="${f.name}">${f.options.map((o) =>
+          `<option value="${esc(o.value)}" ${String(o.value) === String(v) ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`;
+      } else {
+        const t = f.type || "text";
+        input = `<input name="${f.name}" type="${t}" value="${esc(v)}" ${f.required ? "required" : ""}
+          ${t === "number" ? `step="${f.step || "any"}" inputmode="decimal"` : ""} placeholder="${esc(f.placeholder || "")}">`;
+      }
+      return `<label class="f"><span>${esc(f.label)}${f.required ? " *" : ""}</span>${input}</label>`;
+    }).join("") + `<div id="form-error" class="errors hidden"></div>
+      <div class="btns"><button class="btn" value="cancel" formnovalidate>Cancelar</button>
+      <button class="btn primary" value="ok">${esc(submitLabel)}</button></div>`;
+    form.onsubmit = (ev) => {
+      if (ev.submitter?.value !== "ok") return;
+      const data = Object.fromEntries(new FormData(form).entries());
+      for (const f of fields) {
+        if (f.type === "number") data[f.name] = data[f.name] === "" ? null : num(data[f.name]);
+        else data[f.name] = (data[f.name] ?? "").trim();
+      }
+      const err = fields.map((f) => f.validate?.(data[f.name], data)).filter(Boolean);
+      if (err.length) {
+        ev.preventDefault();
+        const box = $("#form-error", form);
+        box.innerHTML = err.map(esc).join("<br>"); box.classList.remove("hidden");
+        return;
+      }
+      dlg.returnData = data;
+    };
+    dlg.returnData = null;
+    dlg.onclose = () => resolve(dlg.returnData);
+    dlg.showModal();
+    form.querySelector("input, select")?.focus();
+  });
+}
+
+const emailOk = (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? null : "El correo no tiene un formato válido.";
+
+// ---------- login ----------
+function showLogin(msg = "") {
+  $("#app").classList.add("hidden");
+  $("#login").classList.remove("hidden");
+  const box = $("#login-error");
+  box.textContent = msg; box.classList.toggle("hidden", !msg);
+  $("#login-key").value = "";
+  $("#login-key").focus();
+}
+
+function logout(msg = "") { apiKey = ""; storageSet(""); showLogin(msg); }
+
+$("#login-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const btn = ev.submitter; btn.disabled = true;
+  apiKey = $("#login-key").value.trim();
+  try {
+    const r = await fetch("api/ping", { headers: { "X-API-Key": apiKey } });
+    if (r.status === 401) return showLogin("La clave de acceso no es correcta.");
+    if (!r.ok) return showLogin("El servidor respondió con un error. Intenta de nuevo.");
+    storageSet(apiKey);
+    await startApp();
+  } catch {
+    showLogin("No se pudo conectar con el servidor. Revisa tu conexión a internet.");
+  } finally { btn.disabled = false; }
+});
+
+$("#logout").addEventListener("click", () => logout());
+
+async function startApp() {
+  $("#login").classList.add("hidden");
+  $("#app").classList.remove("hidden");
+  await loadCompany();
+  go(currentTab);
+}
+
+async function loadCompany() {
+  company = await api("GET", "api/company");
+  $("#company-title").textContent = company.name || "Facturador";
+  document.title = company.name ? `${company.name} · Facturador` : "Facturador";
+}
+
+// ---------- navegación ----------
+const views = {};
+$("#tabs").addEventListener("click", (ev) => { const t = ev.target.closest("button")?.dataset.tab; if (t) go(t); });
+
+async function go(tab) {
+  currentTab = tab;
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  const view = $("#view");
+  view.innerHTML = `<p class="muted">Cargando…</p>`;
+  window.scrollTo(0, 0);
+  try { await views[tab](view); }
+  catch (e) { view.innerHTML = `<div class="errors">${esc(e.message)}</div>`; }
+}
+
+function searchable(view, renderList) {
+  const input = $("input[type=search]", view);
+  input.addEventListener("input", () => renderList(input.value.trim().toLowerCase()));
+  renderList("");
+}
+
+// ---------- clientes ----------
+const CLIENT_FIELDS = [
+  { name: "name", label: "Nombre / razón social", required: true },
+  { name: "doc", label: "Documento (NIT / CC)" },
+  { name: "address", label: "Dirección" },
+  { name: "phone", label: "Teléfono", type: "tel" },
+  { name: "email", label: "Correo", type: "email", validate: emailOk },
+];
+
+async function editClient(c = {}) {
+  const data = await openForm(c.id ? "Editar cliente" : "Nuevo cliente", CLIENT_FIELDS, c);
+  if (!data) return null;
+  return guarded(async () => {
+    if (c.id) { await api("PUT", `api/clients/${c.id}`, data); toast("Cliente actualizado."); return { ...c, ...data }; }
+    const r = await api("POST", "api/clients", data); toast("Cliente creado."); return { ...data, id: r.id };
+  });
+}
+
+views.clientes = async (view) => {
+  const clients = await api("GET", "api/clients");
+  view.innerHTML = `<h2>Clientes</h2>
+    <div class="toolbar"><input type="search" placeholder="Buscar cliente…"><button class="btn primary" id="add">+ Nuevo</button></div>
+    <div class="card"><ul class="list" id="list"></ul></div>`;
+  $("#add", view).onclick = async () => { if (await editClient()) go("clientes"); };
+  searchable(view, (q) => {
+    const rows = clients.filter((c) => [c.name, c.doc, c.phone, c.email].join(" ").toLowerCase().includes(q));
+    $("#list", view).innerHTML = rows.length ? rows.map((c, i) => `<li><div class="main">
+        <div class="title">${esc(c.name)}</div>
+        <div class="muted">${esc([c.doc, c.phone, c.email].filter(Boolean).join(" · "))}</div></div>
+        <div class="actions"><button class="btn small" data-edit="${i}">Editar</button>
+        <button class="btn small danger" data-del="${i}">Eliminar</button></div></li>`).join("")
+      : `<li class="empty">${clients.length ? "Sin resultados." : "Aún no hay clientes."}</li>`;
+    $("#list", view).onclick = async (ev) => {
+      const e = ev.target.dataset;
+      if (e.edit) { if (await editClient(rows[e.edit])) go("clientes"); }
+      if (e.del && confirm(`¿Eliminar a ${rows[e.del].name}?`)) {
+        await guarded(async () => { await api("DELETE", `api/clients/${rows[e.del].id}`); toast("Cliente eliminado."); go("clientes"); });
+      }
+    };
+  });
+};
+
+// ---------- proveedores ----------
+const SUPPLIER_FIELDS = [
+  { name: "name", label: "Nombre del proveedor", required: true },
+  { name: "contact_name", label: "Persona de contacto" },
+  { name: "phone", label: "Teléfono", type: "tel" },
+  { name: "email", label: "Correo", type: "email", validate: emailOk },
+];
+
+views.proveedores = async (view) => {
+  const suppliers = await api("GET", "api/suppliers");
+  view.innerHTML = `<h2>Proveedores</h2>
+    <div class="toolbar"><input type="search" placeholder="Buscar proveedor…"><button class="btn primary" id="add">+ Nuevo</button></div>
+    <div class="card"><ul class="list" id="list"></ul></div>`;
+  const edit = async (s = {}) => {
+    const data = await openForm(s.id ? "Editar proveedor" : "Nuevo proveedor", SUPPLIER_FIELDS, s);
+    if (!data) return;
+    await guarded(async () => {
+      if (s.id) await api("PUT", `api/suppliers/${s.id}`, data); else await api("POST", "api/suppliers", data);
+      toast("Proveedor guardado."); go("proveedores");
+    });
+  };
+  $("#add", view).onclick = () => edit();
+  searchable(view, (q) => {
+    const rows = suppliers.filter((s) => [s.name, s.contact_name, s.phone, s.email].join(" ").toLowerCase().includes(q));
+    $("#list", view).innerHTML = rows.length ? rows.map((s, i) => `<li><div class="main">
+        <div class="title">${esc(s.name)}</div>
+        <div class="muted">${esc([s.contact_name, s.phone, s.email].filter(Boolean).join(" · "))}</div></div>
+        <div class="actions"><button class="btn small" data-edit="${i}">Editar</button>
+        <button class="btn small danger" data-del="${i}">Eliminar</button></div></li>`).join("")
+      : `<li class="empty">${suppliers.length ? "Sin resultados." : "Aún no hay proveedores."}</li>`;
+    $("#list", view).onclick = async (ev) => {
+      const e = ev.target.dataset;
+      if (e.edit) edit(rows[e.edit]);
+      if (e.del && confirm(`¿Eliminar a ${rows[e.del].name}?`)) {
+        await guarded(async () => { await api("DELETE", `api/suppliers/${rows[e.del].id}`); toast("Proveedor eliminado."); go("proveedores"); });
+      }
+    };
+  });
+};
+
+// ---------- productos ----------
+views.productos = async (view) => {
+  const [products, suppliers] = await Promise.all([api("GET", "api/products"), api("GET", "api/suppliers")]);
+  const fields = [
+    { name: "name", label: "Nombre", required: true },
+    { name: "price", label: `Precio de venta (${company.currency || "$"})`, type: "number", required: true,
+      validate: (v) => v > 0 ? null : "El precio debe ser mayor que cero." },
+    { name: "cost_price", label: "Precio de costo", type: "number", default: 0,
+      validate: (v) => v === null || v >= 0 ? null : "El costo no puede ser negativo." },
+    { name: "stock_qty", label: "Existencias (stock)", type: "number", default: 0,
+      validate: (v) => v === null || v >= 0 ? null : "Las existencias no pueden ser negativas." },
+    { name: "unit", label: "Unidad", placeholder: "unidad, hora, caja…", default: "unidad" },
+    { name: "supplier_id", label: "Proveedor", type: "select",
+      options: [{ value: "", label: "— sin proveedor —" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))] },
+  ];
+  view.innerHTML = `<h2>Productos</h2>
+    <div class="toolbar"><input type="search" placeholder="Buscar producto…"><button class="btn primary" id="add">+ Nuevo</button></div>
+    <div class="card"><ul class="list" id="list"></ul></div>`;
+  const edit = async (p = {}) => {
+    const data = await openForm(p.id ? "Editar producto" : "Nuevo producto", fields, p);
+    if (!data) return;
+    data.unit = data.unit || "unidad"; data.stock_qty ??= 0; data.cost_price ??= 0;
+    await guarded(async () => {
+      if (p.id) await api("PUT", `api/products/${p.id}`, data); else await api("POST", "api/products", data);
+      toast("Producto guardado."); go("productos");
+    });
+  };
+  const restock = async (p) => {
+    const data = await openForm(`Reabastecer: ${p.name}`, [
+      { name: "qty", label: `Cantidad que ingresa (hay ${fmtNum(p.stock_qty)})`, type: "number", required: true,
+        validate: (v) => v > 0 ? null : "La cantidad debe ser mayor que cero." },
+      { name: "note", label: "Nota (opcional)", placeholder: "ej. factura del proveedor 123" },
+    ], {}, "Sumar al stock");
+    if (!data) return;
+    await guarded(async () => { await api("POST", `api/products/${p.id}/restock`, data); toast("Stock actualizado."); go("productos"); });
+  };
+  $("#add", view).onclick = () => edit();
+  searchable(view, (q) => {
+    const rows = products.filter((p) => [p.name, p.supplier_name].join(" ").toLowerCase().includes(q));
+    $("#list", view).innerHTML = rows.length ? rows.map((p, i) => `<li><div class="main">
+        <div class="title">${esc(p.name)}</div>
+        <div class="muted"><span class="money">${esc(money(p.price))}</span> / ${esc(p.unit || "unidad")}
+          · <span class="badge ${(p.stock_qty || 0) <= 0 ? "low" : ""}">Stock: ${fmtNum(p.stock_qty)}</span>
+          ${p.supplier_name ? " · " + esc(p.supplier_name) : ""}</div></div>
+        <div class="actions"><button class="btn small" data-restock="${i}">+ Stock</button>
+        <button class="btn small" data-edit="${i}">Editar</button>
+        <button class="btn small danger" data-del="${i}">Eliminar</button></div></li>`).join("")
+      : `<li class="empty">${products.length ? "Sin resultados." : "Aún no hay productos."}</li>`;
+    $("#list", view).onclick = async (ev) => {
+      const e = ev.target.dataset;
+      if (e.edit) edit(rows[e.edit]);
+      if (e.restock) restock(rows[e.restock]);
+      if (e.del && confirm(`¿Eliminar ${rows[e.del].name}?`)) {
+        await guarded(async () => { await api("DELETE", `api/products/${rows[e.del].id}`); toast("Producto eliminado."); go("productos"); });
+      }
+    };
+  });
+};
+
+// ---------- empresa ----------
+views.empresa = async (view) => {
+  await loadCompany();
+  const c = company;
+  view.innerHTML = `<h2>Mi empresa</h2><p class="muted">Estos datos aparecen en el encabezado de cada factura.</p>
+    <form class="card" id="f">
+      <div class="grid2">
+        <label class="f"><span>Nombre de la empresa</span><input name="name" value="${esc(c.name)}"></label>
+        <label class="f"><span>NIT / identificación</span><input name="tax_id" value="${esc(c.tax_id)}"></label>
+      </div>
+      <label class="f"><span>Dirección</span><input name="address" value="${esc(c.address)}"></label>
+      <div class="grid2">
+        <label class="f"><span>Teléfono</span><input name="phone" type="tel" value="${esc(c.phone)}"></label>
+        <label class="f"><span>Correo</span><input name="email" type="email" value="${esc(c.email)}"></label>
+        <label class="f"><span>Sitio web</span><input name="website" value="${esc(c.website)}"></label>
+        <label class="f"><span>Moneda (símbolo)</span><input name="currency" value="${esc(c.currency || "$")}"></label>
+        <label class="f"><span>Nombre del impuesto</span><input name="tax_label" value="${esc(c.tax_label || "IVA")}"></label>
+        <label class="f"><span>Tarifa por defecto (%)</span><input name="tax_rate" type="number" step="any" inputmode="decimal" value="${esc(c.tax_rate ?? 19)}"></label>
+      </div>
+      <label class="f"><span>Nota al pie de la factura</span><textarea name="footer_note" rows="2">${esc(c.footer_note)}</textarea></label>
+      <div id="err" class="errors hidden"></div>
+      <button class="btn primary" type="submit">Guardar datos</button>
+    </form>
+    <div class="card"><h2 style="font-size:1.1rem">Logo</h2>
+      ${c.logo_base64 ? `<img class="logo-prev" src="data:${esc(c.logo_mime || "image/png")};base64,${c.logo_base64}" alt="Logo actual">` : `<p class="muted">Sin logo.</p>`}
+      <div class="toolbar"><label class="btn"><input type="file" id="logo" accept="image/png,image/jpeg" class="hidden">Elegir imagen…</label>
+      ${c.logo_base64 ? `<button class="btn danger" id="rmlogo">Quitar logo</button>` : ""}</div>
+      <p class="muted">PNG o JPG, máximo 2 MB.</p></div>`;
+  $("#f", view).onsubmit = async (ev) => {
+    ev.preventDefault();
+    const d = Object.fromEntries(new FormData(ev.target).entries());
+    const errs = [];
+    d.tax_rate = num(d.tax_rate);
+    if (d.tax_rate === null || d.tax_rate < 0 || d.tax_rate > 100) errs.push("La tarifa debe ser un número entre 0 y 100.");
+    if (emailOk(d.email)) errs.push(emailOk(d.email));
+    const box = $("#err", view);
+    box.innerHTML = errs.map(esc).join("<br>"); box.classList.toggle("hidden", !errs.length);
+    if (errs.length) return;
+    await guarded(async () => { await api("POST", "api/company", d); await loadCompany(); toast("Datos guardados."); });
+  };
+  $("#logo", view).onchange = (ev) => {
+    const file = ev.target.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) return toast("La imagen pesa más de 2 MB.", true);
+    const reader = new FileReader();
+    reader.onload = () => guarded(async () => {
+      await api("POST", "api/company/logo", { data_base64: reader.result.split(",")[1], mime: file.type });
+      toast("Logo actualizado."); go("empresa");
+    });
+    reader.readAsDataURL(file);
+  };
+  const rm = $("#rmlogo", view);
+  if (rm) rm.onclick = () => confirm("¿Quitar el logo?") && guarded(async () => {
+    await api("POST", "api/company/logo", { data_base64: null, mime: null }); toast("Logo eliminado."); go("empresa");
+  });
+};
+
+// ---------- historial ----------
+async function downloadPdf(inv) {
+  const r = await api("GET", `api/invoices/${inv.id}/pdf`, undefined, { raw: true });
+  const blob = await r.blob();
+  const name = `${inv.number}.pdf`;
+  const file = new File([blob], name, { type: "application/pdf" });
+  // En el celular, ofrece compartir (WhatsApp, correo…) si el navegador lo permite.
+  if (navigator.canShare?.({ files: [file] }) && matchMedia("(pointer: coarse)").matches) {
+    try { await navigator.share({ files: [file], title: `Factura ${inv.number}` }); return; }
+    catch (e) { if (e.name === "AbortError") return; }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+views.historial = async (view) => {
+  const invoices = await api("GET", "api/invoices");
+  view.innerHTML = `<h2>Historial de facturas</h2>
+    <div class="toolbar"><input type="search" placeholder="Buscar por número o cliente…"></div>
+    <div class="card"><ul class="list" id="list"></ul></div>`;
+  searchable(view, (q) => {
+    const rows = invoices.filter((i) => [i.number, i.client_name, i.client_doc, i.seller].join(" ").toLowerCase().includes(q));
+    $("#list", view).innerHTML = rows.length ? rows.map((inv, i) => `<li><div class="main">
+        <div class="title">${esc(inv.number)} · ${esc(fmtDate(inv.created_at))}</div>
+        <div class="muted">${esc(inv.client_name || "Sin cliente")} · <span class="money">${esc(money(inv.total))}</span></div></div>
+        <div class="actions"><button class="btn small" data-pdf="${i}">PDF</button>
+        <button class="btn small danger" data-del="${i}">Eliminar</button></div></li>`).join("")
+      : `<li class="empty">${invoices.length ? "Sin resultados." : "Aún no hay facturas."}</li>`;
+    $("#list", view).onclick = async (ev) => {
+      const e = ev.target.dataset;
+      if (e.pdf) {
+        ev.target.disabled = true;
+        await guarded(() => downloadPdf(rows[e.pdf]));
+        ev.target.disabled = false;
+      }
+      if (e.del && confirm(`¿Eliminar la factura ${rows[e.del].number}? El stock de sus artículos se devolverá al inventario. No se puede deshacer.`)) {
+        await guarded(async () => { await api("DELETE", `api/invoices/${rows[e.del].id}`); toast("Factura eliminada."); go("historial"); });
+      }
+    };
+  });
+};
+
+// ---------- nueva factura ----------
+views.factura = async (view) => {
+  const [clients, products] = await Promise.all([api("GET", "api/clients"), api("GET", "api/products"), loadCompany()]);
+  const state = { clientId: "", lines: [] };
+  const productById = Object.fromEntries(products.map((p) => [p.id, p]));
+  const taxLabel = company.tax_label || "Impuesto";
+
+  view.innerHTML = `<h2>Nueva factura</h2>
+    <p class="muted">Los artículos se eligen desde tu catálogo, para llevar el inventario al día.</p>
+    <div id="errors" class="errors hidden"></div>
+    <div class="card">
+      <label class="f"><span>Cliente *</span><select id="client"></select></label>
+      <div class="client-info" id="client-info"></div>
+      <button class="btn small" id="new-client">+ Nuevo cliente</button>
+    </div>
+    <div class="card">
+      <div class="muted" style="margin-bottom:8px">Artículos</div>
+      <div id="lines"></div>
+      <button class="btn" id="add-line">+ Añadir artículo</button>
+    </div>
+    <div class="card">
+      <div class="grid2">
+        <label class="f"><span>${esc(taxLabel)} (%)</span><input id="tax" type="number" step="any" inputmode="decimal" value="${esc(company.tax_rate ?? 19)}"></label>
+        <label class="f"><span>Vendedor (opcional)</span><input id="seller" placeholder="¿Quién hizo la venta?"></label>
+        <label class="f"><span>Notas (opcional)</span><input id="notes" placeholder="Condiciones de pago, etc."></label>
+        <label class="f"><span>Garantía (opcional)</span><input id="warranty" placeholder="ej. 6 meses por defectos de fábrica"></label>
+      </div>
+      <div class="totals">
+        <div><span>Subtotal</span><span class="money" id="t-gross"></span></div>
+        <div><span>Descuento</span><span class="money" id="t-disc"></span></div>
+        <div><span>${esc(taxLabel)}</span><span class="money" id="t-tax"></span></div>
+        <div class="grand"><span>Total</span><span class="money" id="t-total"></span></div>
+      </div>
+      <button class="btn primary block" id="generate">Generar factura y descargar PDF</button>
+    </div>`;
+
+  const renderClients = () => {
+    $("#client", view).innerHTML = `<option value="">— elegir cliente —</option>` + clients.map((c) =>
+      `<option value="${esc(c.id)}" ${c.id === state.clientId ? "selected" : ""}>${esc(c.name)}${c.doc ? " — " + esc(c.doc) : ""}</option>`).join("");
+    const c = clients.find((x) => x.id === state.clientId);
+    $("#client-info", view).textContent = c
+      ? [c.doc, c.address, [c.phone, c.email].filter(Boolean).join(" · ")].filter(Boolean).join("\n") : "";
+  };
+  $("#client", view).onchange = (ev) => { state.clientId = ev.target.value; renderClients(); };
+  $("#new-client", view).onclick = async () => {
+    const c = await editClient();
+    if (c) { clients.push(c); clients.sort((a, b) => a.name.localeCompare(b.name)); state.clientId = c.id; renderClients(); }
+  };
+
+  const productOptions = (sel) => `<option value="">— elegir producto —</option>` + products.map((p) =>
+    `<option value="${esc(p.id)}" ${p.id === sel ? "selected" : ""} ${(p.stock_qty || 0) <= 0 && p.id !== sel ? "disabled" : ""}>${esc(p.name)} (stock: ${fmtNum(p.stock_qty)})</option>`).join("");
+
+  const renderLines = () => {
+    $("#lines", view).innerHTML = state.lines.map((l, i) => `<div class="line-item" data-i="${i}">
+        <label class="f"><span>Producto</span><select data-k="productId">${productOptions(l.productId)}</select></label>
+        <div class="nums">
+          <label class="f"><span>Cant.</span><input data-k="qty" type="number" step="any" inputmode="decimal" value="${esc(l.qty)}"></label>
+          <label class="f"><span>Precio</span><input data-k="price" type="number" step="any" inputmode="decimal" value="${esc(l.price)}"></label>
+          <label class="f"><span>Desc. %</span><input data-k="discount" type="number" step="any" inputmode="decimal" value="${esc(l.discount)}"></label>
+        </div>
+        <div class="foot"><span class="money" data-total></span>
+          <button class="btn small danger" data-remove>Quitar</button></div></div>`).join("");
+    recalc();
+  };
+
+  const recalc = () => {
+    let gross = 0, disc = 0;
+    state.lines.forEach((l, i) => {
+      const q = num(l.qty) || 0, p = num(l.price) || 0, d = num(l.discount) || 0;
+      gross += q * p; disc += q * p * d / 100;
+      const el = $(`.line-item[data-i="${i}"] [data-total]`, view);
+      if (el) el.textContent = money(q * p * (1 - d / 100));
+    });
+    const net = gross - disc, tax = net * (num($("#tax", view).value) || 0) / 100;
+    $("#t-gross", view).textContent = money(gross);
+    $("#t-disc", view).textContent = disc ? "- " + money(disc) : money(0);
+    $("#t-tax", view).textContent = money(tax);
+    $("#t-total", view).textContent = money(net + tax);
+  };
+
+  const addLine = () => { state.lines.push({ productId: "", qty: "1", price: "", discount: "0" }); renderLines(); };
+
+  $("#lines", view).addEventListener("input", (ev) => {
+    const box = ev.target.closest(".line-item"); const k = ev.target.dataset.k;
+    if (!box || !k) return;
+    const line = state.lines[box.dataset.i];
+    line[k] = ev.target.value;
+    if (k === "productId") {
+      const p = productById[line.productId];
+      line.price = p ? String(p.price) : "";
+      $('[data-k="price"]', box).value = line.price;
+    }
+    recalc();
+  });
+  $("#lines", view).addEventListener("click", (ev) => {
+    if (!ev.target.matches("[data-remove]")) return;
+    state.lines.splice(ev.target.closest(".line-item").dataset.i, 1);
+    if (!state.lines.length) addLine(); else renderLines();
+  });
+  $("#add-line", view).onclick = addLine;
+  $("#tax", view).oninput = recalc;
+
+  $("#generate", view).onclick = async (ev) => {
+    const errors = [];
+    const client = clients.find((c) => c.id === state.clientId);
+    if (!client) errors.push("Falta el cliente: selecciónalo de la lista o crea uno nuevo.");
+    const active = state.lines.filter((l) => l.productId);
+    if (!active.length) errors.push("Añade al menos un artículo desde el catálogo.");
+    const items = [];
+    const requested = {};
+    for (const l of active) {
+      const p = productById[l.productId];
+      const qty = num(l.qty), price = num(l.price), discount = num(l.discount);
+      requested[p.id] = (requested[p.id] || 0) + (qty || 0);
+      if (qty === null || qty <= 0) errors.push(`En "${p.name}": la cantidad debe ser mayor que cero.`);
+      if (price === null || price <= 0) errors.push(`En "${p.name}": el precio debe ser mayor que cero.`);
+      if (discount === null || discount < 0 || discount > 100) errors.push(`En "${p.name}": el descuento debe estar entre 0 y 100.`);
+      items.push({ product_id: p.id, qty, price, discount });
+    }
+    for (const [pid, qty] of Object.entries(requested)) {
+      const p = productById[pid];
+      if (qty > (p.stock_qty || 0)) errors.push(`"${p.name}": pediste ${fmtNum(qty)} pero solo hay ${fmtNum(p.stock_qty)} en existencia.`);
+    }
+    const taxRate = num($("#tax", view).value);
+    if (taxRate === null || taxRate < 0 || taxRate > 100) errors.push(`La tarifa de ${taxLabel} debe estar entre 0 y 100.`);
+
+    const box = $("#errors", view);
+    box.innerHTML = errors.length ? `Revisa lo siguiente:<ul>${errors.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>` : "";
+    box.classList.toggle("hidden", !errors.length);
+    if (errors.length) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+
+    ev.target.disabled = true;
+    try {
+      const r = await api("POST", "api/invoices", {
+        client_snapshot: client, items, tax_rate: taxRate,
+        notes: $("#notes", view).value.trim(), warranty: $("#warranty", view).value.trim(),
+        seller: $("#seller", view).value.trim(),
+      });
+      toast(`Factura ${r.number} guardada.`);
+      try { await downloadPdf(r); }
+      catch (e) { toast(`La factura ${r.number} se guardó, pero el PDF falló: ${e.message}. Descárgalo desde Historial.`, true); }
+      go("historial");
+    } catch (e) {
+      box.innerHTML = esc(e.message); box.classList.remove("hidden");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } finally { ev.target.disabled = false; }
+  };
+
+  renderClients();
+  addLine();
+};
+
+// ---------- arranque ----------
+apiKey = storageGet();
+if (apiKey) startApp().catch(() => { if (apiKey) showLogin("No se pudo conectar con el servidor. Intenta de nuevo."); });
+else showLogin();
+</script>
+</body>
+</html>

@@ -10,8 +10,13 @@ donde se guarda todo. Interfaz y mensajes de error en **español**.
 - **`db.py`**: cliente HTTP hacia el servidor. Todas las funciones reciben un `Server(base_url, api_key)`.
   No hay SQL en el cliente. Los errores se lanzan como `db.DBError` con mensaje listo para mostrar al usuario.
 - **`server/app.py`**: API Flask + SQLite (`facturador_server.db`). Desplegada en PythonAnywhere
-  (ver `server/DEPLOY.md`). Todas las rutas exigen el header `X-API-Key`.
-- **`pdf_gen.py`**: PDF con reportlab. La fecha se formatea con `format_date_es` (no usar `strftime('%B')`,
+  (ver `server/DEPLOY.md`). Todas las rutas `/api/*` exigen el header `X-API-Key`.
+- **Versión web**: `server/static/index.html` (HTML + JS sin frameworks ni build), servida en `/`. Usa la
+  misma API con la clave guardada en `localStorage`. Todo texto del usuario va por `esc()` antes de `innerHTML`.
+  El PDF lo genera el servidor en `/api/invoices/<id>/pdf` importando `pdf_gen.py` (que en PythonAnywhere
+  se sube junto a `app.py`).
+- **`pdf_gen.py`**: PDF con reportlab. Todo texto del usuario pasa por `_t()` (escape), porque `Paragraph`
+  interpreta `<`, `>` y `&` como marcado. La fecha se formatea con `format_date_es` (no usar `strftime('%B')`,
   sale en inglés según el locale del sistema).
 - **`config.py`**: guarda URL y clave en `~/.facturador/config.json` (por equipo).
 

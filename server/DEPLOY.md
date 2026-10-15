@@ -13,7 +13,24 @@ una cuenta gratuita. Anota tu nombre de usuario: tu servidor quedará en
 En el panel de PythonAnywhere, abre la pestaña **"Files"** y sube el
 contenido de la carpeta `server/` (arrástralos o usa "Upload a file") a una
 carpeta nueva, por ejemplo `/home/tuusuario/facturador_server/`. Debes
-subir `app.py` y `requirements.txt`.
+subir:
+- `app.py` y `requirements.txt` (de la carpeta `server/`)
+- la carpeta **`static/`** completa (de `server/static/`: `index.html`,
+  `manifest.webmanifest`, `icon.svg`) — es la versión web para celular
+- **`pdf_gen.py`** (está en la raíz del proyecto, no en `server/`) — el
+  servidor lo usa para generar los PDF de la versión web
+
+Debe quedar así:
+```
+/home/tuusuario/facturador_server/
+  app.py
+  pdf_gen.py
+  requirements.txt
+  static/
+    index.html
+    manifest.webmanifest
+    icon.svg
+```
 
 ## 3. Cambiar la clave de API
 Abre `app.py` (puedes editarlo directo en el navegador de PythonAnywhere) y
@@ -25,11 +42,13 @@ Reemplaza `"cambia-esta-clave"` por algo largo y difícil de adivinar. Esta
 es la clave que vas a compartir con tus empleados (junto con la URL) para
 que sus apps de escritorio se conecten.
 
-## 4. Instalar Flask
+## 4. Instalar dependencias
 En el panel, abre una **"Bash console"** (pestaña "Consoles") y ejecuta:
 ```bash
-pip install --user flask
+pip install --user flask reportlab pillow
 ```
+(Normalmente ya vienen instaladas en PythonAnywhere; si dice
+"Requirement already satisfied", está bien.)
 
 ## 5. Crear la "Web app"
 En la pestaña **"Web"**, clic en **"Add a new web app"**:
@@ -66,7 +85,25 @@ Debería mostrar algo como `{"error":"Clave de API incorrecta o ausente."}`
 — eso es correcto, significa que el servidor está vivo (solo falta la clave,
 que la app de escritorio sí va a enviar).
 
-## 8. Configurar la app de escritorio
+## 8. Usar la versión web (celular, tablet o cualquier computador)
+Abre en el navegador:
+```
+https://tuusuario.pythonanywhere.com
+```
+Ingresa la clave de API del paso 3 y listo: puedes hacer facturas,
+descargar/compartir el PDF (por WhatsApp, correo…), y manejar clientes,
+productos, proveedores y los datos de la empresa. Todo queda en el mismo
+servidor que usa la app de escritorio.
+
+**Instalarla como app en el celular** (opcional): en Android/Chrome, menú
+⋮ → "Agregar a la pantalla principal"; en iPhone/Safari, botón Compartir →
+"Agregar a inicio". Queda un ícono como si fuera una app.
+
+El navegador recuerda la clave hasta que toques **"Salir"**. Si un celular
+se pierde o alguien deja la empresa, cambia la clave (paso 3) y dale
+"Reload": todos tendrán que entrar de nuevo con la clave nueva.
+
+## 9. Configurar la app de escritorio
 En cada equipo, al abrir la app por primera vez (o desde "⚙ Cambiar
 servidor"), ingresa:
 - **URL del servidor:** `https://tuusuario.pythonanywhere.com`

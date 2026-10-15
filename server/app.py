@@ -7,21 +7,34 @@ y se restaura si una factura se elimina.
 Despliegue gratuito sugerido: PythonAnywhere (ver DEPLOY.md).
 """
 import base64
+import hmac
+import io
 import os
 import sqlite3
+import sys
 import time
 import uuid
 from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file, send_from_directory
+from werkzeug.exceptions import HTTPException
+
+# pdf_gen.py puede estar junto a este archivo (en PythonAnywhere) o en la
+# carpeta de arriba (al correrlo desde el repositorio).
+SERVER_DIR = Path(__file__).parent
+for _p in (SERVER_DIR, SERVER_DIR.parent):
+    if (_p / "pdf_gen.py").exists() and str(_p) not in sys.path:
+        sys.path.append(str(_p))
+from pdf_gen import generate_invoice_pdf  # noqa: E402
 
 # -------- configuración --------
 API_KEY = os.environ.get("FACTURADOR_API_KEY", "cambia-esta-clave")
-DB_PATH = str(Path(__file__).parent / "facturador_server.db")
+DB_PATH = str(SERVER_DIR / "facturador_server.db")
+STATIC_DIR = SERVER_DIR / "static"
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=None)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS company (
@@ -109,7 +122,7 @@ def get_conn():
 def require_api_key(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if request.headers.get("X-API-Key", "") != API_KEY:
+        if not hmac.compare_digest(request.headers.get("X-API-Key", "").encode(), API_KEY.encode()):
             return jsonify({"error": "Clave de API incorrecta o ausente."}), 401
         return fn(*args, **kwargs)
     return wrapper
@@ -129,7 +142,25 @@ def handle_api_error(e):
 
 @app.errorhandler(Exception)
 def handle_any_error(e):
+    if isinstance(e, HTTPException):
+        return e
     return jsonify({"error": f"Error en el servidor: {e}"}), 500
+
+
+# ---------- versión web (celular / navegador) ----------
+@app.get("/")
+def web_index():
+    return send_from_directory(STATIC_DIR, "index.html")
+
+
+@app.get("/manifest.webmanifest")
+def web_manifest():
+    return send_from_directory(STATIC_DIR, "manifest.webmanifest", mimetype="application/manifest+json")
+
+
+@app.get("/icon.svg")
+def web_icon():
+    return send_from_directory(STATIC_DIR, "icon.svg", mimetype="image/svg+xml")
 
 
 # ---------- salud ----------
@@ -436,6 +467,23 @@ def create_invoice():
                 conn2.execute("UPDATE company SET invoice_counter=? WHERE id=1", ((row["invoice_counter"] if row else 1) + 1,))
             continue
     return jsonify({"error": "No se pudo generar un número de factura único."}), 500
+
+
+@app.get("/api/invoices/<iid>/pdf")
+@require_api_key
+def invoice_pdf(iid):
+    with get_conn() as conn:
+        inv = conn.execute("SELECT * FROM invoices WHERE id=?", (iid,)).fetchone()
+        if not inv:
+            return jsonify({"error": "Factura no encontrada."}), 404
+        invoice = dict(inv)
+        invoice["items"] = [dict(i) for i in conn.execute(
+            "SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY id", (iid,)).fetchall()]
+        company = dict(conn.execute("SELECT * FROM company WHERE id=1").fetchone())
+    buf = io.BytesIO()
+    generate_invoice_pdf(invoice, company, buf)
+    buf.seek(0)
+    return send_file(buf, mimetype="application/pdf", download_name=f'{invoice["number"]}.pdf')
 
 
 @app.delete("/api/invoices/<iid>")

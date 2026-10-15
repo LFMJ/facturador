@@ -70,10 +70,6 @@ class HistorialTab(ctk.CTkFrame):
             return
         try:
             full_invoice = db.get_invoice_with_items(self.app.server, inv["id"])
-            full_invoice["items"] = [
-                {"description": i["description"], "qty": i["qty"], "price": i["price"]}
-                for i in full_invoice["items"]
-            ]
             company = db.get_company(self.app.server)
             generate_invoice_pdf(full_invoice, company, out_path)
             self.app.show_toast(f'Factura {inv["number"]} descargada.')
