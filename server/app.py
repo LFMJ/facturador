@@ -221,34 +221,27 @@ def init_db():
 
 def _fix_voided_without_refund(conn):
     """Antes, anular una factura (o compra) pagada no registraba la devolución del dinero y la caja lo
-    seguía contando. Se registra ahora, con la fecha de la anulación. Es idempotente: tras el ajuste el
-    neto pagado queda en cero y no se vuelve a aplicar."""
+    seguía contando. Se registra ahora, con la fecha de la anulación y por el mismo método con que se pagó.
+    Es idempotente: tras el ajuste el neto pagado queda en cero y no se vuelve a aplicar."""
     fixes = [("invoices", "payments", "invoice_id", "factura", "Dinero devuelto al anular la factura (ajuste automático)"),
              ("purchases", "supplier_payments", "purchase_id", "compra",
               "Dinero devuelto por el proveedor al anular la compra (ajuste automático)")]
     for table, pay_table, key, entity, note in fixes:
-        rows = conn.execute(
-            f"""SELECT t.id, t.number, t.voided_at, t.created_at,
-                  (SELECT SUM(amount) FROM {pay_table} WHERE {key} = t.id) AS paid,
-                  (SELECT method FROM {pay_table} WHERE {key} = t.id AND amount > 0 ORDER BY amount DESC LIMIT 1) AS method
-                FROM {table} t WHERE t.status = 'anulada'""").fetchall()
-        for r in rows:
-            paid = round(r[4] or 0, 2)
-            if paid <= 0.004:
+        for r in conn.execute(f"SELECT id, number, voided_at, created_at FROM {table} WHERE status = 'anulada'").fetchall():
+            split = _refund_split(conn, pay_table, key, r[0])
+            if not split:
                 continue
-            when = r[2] or r[3] or time.time()
-            conn.execute(
-                f"""INSERT INTO {pay_table} (id, {key}, amount, method, note, created_at, user_id, user_name)
-                    VALUES (?,?,?,?,?,?,NULL,'Ajuste automático')""",
-                (str(uuid.uuid4()), r[0], -paid, r[5] or "efectivo", note, when))
+            for method, amount in split.items():
+                conn.execute(
+                    f"""INSERT INTO {pay_table} (id, {key}, amount, method, note, created_at, user_id, user_name)
+                        VALUES (?,?,?,?,?,?,NULL,'Ajuste automático')""",
+                    (str(uuid.uuid4()), r[0], -amount, method, note, r[2] or r[3] or time.time()))
             conn.execute(
                 "INSERT INTO activity_log (created_at, user_id, user_name, entity, entity_id, summary) VALUES (?,NULL,?,?,?,?)",
                 (time.time(), "Ajuste automático", entity, r[0],
-                 f"Registró la devolución de {paid:,.2f} ({r[5] or 'efectivo'}) de la {entity} anulada {r[1]}, "
+                 f"Registró la devolución de {_split_text(split)} de la {entity} anulada {r[1]}, "
                  "que antes seguía contando en la caja"))
 
-
-init_db()
 
 
 @contextmanager
@@ -1097,13 +1090,27 @@ def invoice_pdf(iid):
     return send_file(buf, mimetype="application/pdf", download_name=f'{inv["number"]}.pdf')
 
 
-def _refund_method(conn, table, key, iid, chosen):
-    """Método para devolver el dinero: el elegido, o el del pago más grande que se recibió."""
+def _refund_split(conn, table, key, iid, chosen=None):
+    """Cómo se devuelve lo pagado: {método: monto}. Por defecto, igual que se pagó (lo neto de cada método);
+    si se eligió un método, todo por ese método."""
+    nets = {r[0]: money(r[1]) for r in conn.execute(
+        f"SELECT method, SUM(amount) FROM {table} WHERE {key}=? GROUP BY method", (iid,)).fetchall()}
+    total = money(sum(nets.values()))
+    if total <= 0.004:
+        return {}
     if chosen:
-        return parse_method(chosen)
-    row = conn.execute(f"SELECT method FROM {table} WHERE {key}=? AND amount > 0 ORDER BY amount DESC LIMIT 1",
-                       (iid,)).fetchone()
-    return row["method"] if row else "efectivo"
+        return {parse_method(chosen): total}
+    split = {m: v for m, v in nets.items() if v > 0.004}
+    # si por devoluciones previas algún método quedó negativo, se compensa en el método con más saldo
+    extra = money(total - sum(split.values()))
+    if extra and split:
+        biggest = max(split, key=split.get)
+        split[biggest] = money(split[biggest] + extra)
+    return {m: v for m, v in split.items() if v > 0.004}
+
+
+def _split_text(split):
+    return " + ".join(f"{fmt(v)} ({m})" for m, v in split.items())
 
 
 def _void_invoice(iid, reason, refund_method=None):
@@ -1130,16 +1137,15 @@ def _void_invoice(iid, reason, refund_method=None):
                     (it["product_id"], qty, "anulación factura", inv["number"], now))
         # Lo que el cliente ya había pagado se le devuelve: queda como un pago negativo con la fecha de hoy,
         # para que la caja del día descuente ese dinero (y la del día de la venta no cambie).
-        paid = money(conn.execute("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id=?", (iid,)).fetchone()[0])
-        refund_text = ""
-        if paid > 0.004:
-            method = _refund_method(conn, "payments", "invoice_id", iid, refund_method)
+        split = _refund_split(conn, "payments", "invoice_id", iid, refund_method)
+        for method, amount in split.items():
             conn.execute(
                 """INSERT INTO payments (id, invoice_id, amount, method, note, created_at, user_id, user_name)
                    VALUES (?,?,?,?,?,?,?,?)""",
-                (str(uuid.uuid4()), iid, -paid, method, "Dinero devuelto al anular la factura", now,
+                (str(uuid.uuid4()), iid, -amount, method, "Dinero devuelto al anular la factura", now,
                  g.user["id"], g.user["name"]))
-            refund_text = f"; se devolvieron {fmt(paid)} ({method}) al cliente"
+        paid = money(sum(split.values()))
+        refund_text = f"; se devolvieron {_split_text(split)} al cliente" if split else ""
         conn.execute("UPDATE invoices SET status='anulada', voided_at=?, voided_by=?, void_reason=? WHERE id=?",
                      (now, g.user["name"], reason, iid))
         log(conn, "factura", iid, f'Anuló la factura {inv["number"]} ({inv["client_name"]}): {reason}{refund_text}')
@@ -1432,15 +1438,14 @@ def void_purchase(pid):
             conn.execute(
                 "INSERT INTO stock_movements (product_id, change_qty, reason, reference, created_at) VALUES (?,?,?,?,?)",
                 (it["product_id"], -it["qty"], "anulación compra", p["number"], now))
-        refund_text = ""
-        if p["paid"] > 0.004:
-            method = _refund_method(conn, "supplier_payments", "purchase_id", pid, d.get("refund_method"))
+        split = _refund_split(conn, "supplier_payments", "purchase_id", pid, d.get("refund_method"))
+        for method, amount in split.items():
             conn.execute(
                 """INSERT INTO supplier_payments (id, purchase_id, amount, method, note, created_at, user_id, user_name)
                    VALUES (?,?,?,?,?,?,?,?)""",
-                (str(uuid.uuid4()), pid, -p["paid"], method, "Dinero devuelto por el proveedor al anular la compra", now,
+                (str(uuid.uuid4()), pid, -amount, method, "Dinero devuelto por el proveedor al anular la compra", now,
                  g.user["id"], g.user["name"]))
-            refund_text = f'; el proveedor devolvió {fmt(p["paid"])} ({method})'
+        refund_text = f"; el proveedor devolvió {_split_text(split)}" if split else ""
         conn.execute("UPDATE purchases SET status='anulada', voided_at=?, voided_by=?, void_reason=? WHERE id=?",
                      (now, g.user["name"], reason, pid))
         log(conn, "compra", pid, f'Anuló la compra {p["number"]} ({p["supplier_name"]}): {reason}{refund_text}')
@@ -1830,6 +1835,10 @@ def get_backup(name):
     if not path.is_file():
         raise ApiError("Copia no encontrada.", 404)
     return send_file(path, mimetype="application/octet-stream", as_attachment=True, download_name=name)
+
+
+# Al final del módulo: init_db() usa funciones definidas más arriba (p. ej. _refund_split).
+init_db()
 
 
 if __name__ == "__main__":

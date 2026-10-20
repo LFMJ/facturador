@@ -879,7 +879,7 @@ async function purchaseDetail(id) {
         await closeModal(dlg);
         const data = await openForm(`Anular ${p.number}`, [{ name: "reason", label: "Motivo", required: true },
           ...(p.paid > 0 ? [{ name: "refund_method", label: `¿Cómo te devuelve el proveedor los ${money(p.paid)}?`, type: "select",
-            options: PAYMENT_METHODS.map(([value, label]) => ({ value, label })), default: (p.payments.find((x) => x.amount > 0) || {}).method }] : [])],
+            options: [{ value: "", label: "Igual que le pagaste" }, ...PAYMENT_METHODS.map(([value, label]) => ({ value, label }))] }] : [])],
           {}, "Anular compra",
           `<div class="note">Se resta del inventario lo que entró con esta compra. El costo promedio de los productos no se recalcula.</div>
           ${p.paid > 0 ? `<div class="note">Ya le pagaste <b>${esc(money(p.paid))}</b>: queda registrado como dinero que te devuelve hoy y suma en el cierre de caja.</div>` : ""}`);
@@ -1324,7 +1324,7 @@ async function voidInvoice(inv) {
   const data = await openForm(`Anular ${inv.number}`, [
     { name: "reason", label: "Motivo de la anulación", required: true, placeholder: "ej. error en el cliente…" },
     ...(paid > 0 ? [{ name: "refund_method", label: `¿Cómo se le devuelven los ${money(paid)} al cliente?`, type: "select",
-      options: PAYMENT_METHODS.map(([value, label]) => ({ value, label })), default: (inv.payments?.find((x) => x.amount > 0) || {}).method }] : []),
+      options: [{ value: "", label: "Igual que pagó" }, ...PAYMENT_METHODS.map(([value, label]) => ({ value, label }))] }] : []),
   ], {}, "Anular factura", `<div class="note">La factura queda en el historial marcada como ANULADA (no se borra, para no
     dejar huecos en la numeración) y el stock de sus artículos vuelve al inventario. Si solo devuelven algunos artículos, usa <b>Devolución</b>. No se puede deshacer.</div>
     ${paid > 0 ? `<div class="note">El cliente ya pagó <b>${esc(money(paid))}</b>: queda registrado como dinero devuelto hoy y se descuenta en el cierre de caja.</div>` : ""}`);

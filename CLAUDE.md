@@ -33,7 +33,8 @@ su código está en el historial de git (commit `abf58e9`) por si se vuelve a in
 - Al facturar se descuenta stock (sumando líneas repetidas del mismo producto); si no alcanza responde 400.
 - Las facturas **no se borran**: se anulan (`status='anulada'`) y se restaura el stock no devuelto antes.
   Si el cliente había pagado, se registra un pago **negativo** por el neto pagado, con la fecha de la anulación
-  (así la caja de ese día descuenta el dinero y la del día de la venta no cambia). Igual al anular una compra
+  por el mismo método con que se pagó, salvo que se elija otro (así la caja de ese día descuenta el dinero
+  y la del día de la venta no cambia). Igual al anular una compra
   pagada (`supplier_payments` negativo = el proveedor devuelve). `_fix_voided_without_refund()` corrige al
   arrancar los registros anulados antes de esta regla. `DELETE /api/invoices/<id>` también anula.
 - **Devoluciones parciales** (`returns` / `return_items`): suben el stock y bajan el total de la factura
