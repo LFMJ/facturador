@@ -1726,7 +1726,18 @@ def list_expenses():
                                 ORDER BY e.spent_at DESC""", params).fetchall()
         categories = [r[0] for r in conn.execute(
             "SELECT DISTINCT category FROM expenses WHERE category <> '' ORDER BY category COLLATE NOCASE")]
-    return jsonify({"expenses": [dict(r) for r in rows], "categories": categories})
+        supplier_payments, purchases = [], {"count": 0, "total": 0.0}
+        if is_admin():
+            # Lo pagado a proveedores también es dinero que sale: se muestra junto a los gastos para cuadrar el mes.
+            supplier_payments = [dict(r) for r in conn.execute(
+                """SELECT sp.id, sp.created_at, sp.amount, sp.method, sp.note, sp.user_name, p.id AS purchase_id,
+                          p.number, p.supplier_name FROM supplier_payments sp JOIN purchases p ON p.id = sp.purchase_id
+                   WHERE sp.created_at >= ? AND sp.created_at < ? ORDER BY sp.created_at DESC""", (start, end))]
+            bought = _purchase_rows(conn, "WHERE p.created_at >= ? AND p.created_at < ? AND p.status <> 'anulada'", (start, end))
+            purchases = {"count": len(bought), "total": money(sum(x["total"] for x in bought)),
+                         "owed": money(sum(x["balance"] for x in bought))}
+    return jsonify({"expenses": [dict(r) for r in rows], "categories": categories,
+                    "supplier_payments": supplier_payments, "purchases": purchases})
 
 
 @app.post("/api/expenses")
@@ -1938,6 +1949,9 @@ def dashboard():
                WHERE spent_at >= ? AND spent_at < ? GROUP BY 1 ORDER BY amount DESC""", (start, end)).fetchall()
         purchases = _purchase_rows(conn, "WHERE p.created_at >= ? AND p.created_at < ? AND p.status <> 'anulada'", (start, end))
         payables = [p for p in _purchase_rows(conn, "WHERE p.status <> 'anulada'") if p["balance"] > 0.004]
+        paid_suppliers = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM supplier_payments WHERE created_at >= ? AND created_at < ?",
+            (start, end)).fetchone()[0]
 
     def base(i, with_discount=True):
         """Valor de la línea sin IVA (si el precio traía el IVA, se le quita)."""
@@ -2011,6 +2025,10 @@ def dashboard():
         "expenses_by_category": [{"category": e["category"], "amount": money(e["amount"])} for e in expenses],
         "purchases": {"total": money(sum(p["total"] for p in purchases)), "count": len(purchases)},
         "payables": {"total": money(sum(p["balance"] for p in payables)), "count": len(payables)},
+        # Flujo de caja: el dinero que de verdad entró y salió (aquí sí cuentan las compras pagadas).
+        "cash_flow": {"in": money(sum(p["amount"] for p in payments)), "expenses": money(expense_total),
+                      "suppliers": money(paid_suppliers),
+                      "net": money(sum(p["amount"] for p in payments) - expense_total - paid_suppliers)},
         "receivables": {
             "total": money(sum(r["balance"] for r in receivables)), "count": len(receivables),
             "invoices": [{k: r[k] for k in ("id", "number", "client_name", "client_id", "created_at", "total", "balance")}

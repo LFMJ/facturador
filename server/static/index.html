@@ -589,7 +589,15 @@ views.resumen = async (view) => {
       <div class="tile"><div class="k">Te deben (clientes)</div><div class="v">${esc(money(d.receivables.total))}</div><div class="s">${plural(d.receivables.count, "factura")} con saldo</div></div>
       <div class="tile"><div class="k">Debes (proveedores)</div><div class="v">${esc(money(d.payables.total))}</div><div class="s">${plural(d.payables.count, "compra")} con saldo</div></div>
       <div class="tile"><div class="k">Compras de mercancía</div><div class="v">${esc(money(d.purchases.total))}</div><div class="s">${plural(d.purchases.count, "compra")} en el período</div></div>
+      <div class="tile"><div class="k">Flujo de caja</div><div class="v ${d.cash_flow.net < 0 ? "neg" : ""}">${esc(money(d.cash_flow.net))}</div><div class="s">lo que entró − lo que salió</div></div>
     </div>
+    <div class="card"><h3>Flujo de caja (dinero que entró y salió)</h3><table class="t"><tbody>
+      <tr><td>Cobrado a clientes</td><td class="r money">${esc(money(d.cash_flow.in))}</td></tr>
+      <tr><td>Gastos del negocio</td><td class="r money">− ${esc(money(d.cash_flow.expenses))}</td></tr>
+      <tr><td>Pagado a proveedores (compras)</td><td class="r money">− ${esc(money(d.cash_flow.suppliers))}</td></tr>
+      <tr><td><b>Neto</b></td><td class="r money ${d.cash_flow.net < 0 ? "neg" : ""}"><b>${esc(money(d.cash_flow.net))}</b></td></tr></tbody></table>
+      <p class="muted" style="margin:8px 0 0">La <b>ganancia real</b> no resta las compras: el costo de cada producto ya se descuenta cuando se vende.
+        El flujo de caja sí, porque es el dinero que salió.</p></div>
     ${s.items_without_cost ? `<div class="note">${s.items_without_cost} artículo(s) vendidos no tienen precio de costo, así que la ganancia aparece más alta de lo real. Pon el costo en Productos o registra la compra en Compras.</div>` : ""}
     <div class="card"><h3>Ventas por ${d.series.unit === "month" ? "mes" : "día"}</h3><div id="chart"></div>
       <p class="muted" style="margin:8px 0 0">Promedio por factura: <span class="money">${esc(money(s.avg_ticket))}</span>
@@ -1078,16 +1086,23 @@ let gastosMonth = localDay().slice(0, 7);
 views.gastos = async (view) => {
   const [y, m] = gastosMonth.split("-").map(Number);
   const start = new Date(y, m - 1, 1) / 1000, end = new Date(y, m, 1) / 1000;
-  const { expenses, categories } = await api("GET", `api/expenses?start=${start}&end=${end}`);
+  const { expenses, categories, supplier_payments: supPays, purchases } = await api("GET", `api/expenses?start=${start}&end=${end}`);
+  const paidSuppliers = supPays.reduce((a, p) => a + p.amount, 0);
   const cats = [...new Set([...categories, ...DEFAULT_EXPENSE_CATEGORIES])];
   const total = expenses.reduce((a, e) => a + e.amount, 0);
   const byCat = {};
   expenses.forEach((e) => { byCat[e.category || "Sin categoría"] = (byCat[e.category || "Sin categoría"] || 0) + e.amount; });
   view.innerHTML = `<h2>Gastos</h2>${categoryDatalist("exp-cats", cats)}
-    <p class="muted">${isAdmin() ? "Lo que el negocio paga: arriendo, servicios, nómina, transporte… Se restan de la ganancia en el Resumen."
+    <p class="muted">${isAdmin() ? "Todo el dinero que salió en el mes: los gastos del negocio (arriendo, servicios, nómina…) y lo que se les pagó a los proveedores por mercancía."
       : "Registra aquí los gastos que pagues con dinero de la caja (transporte, papelería…). Se descuentan en tu cierre de caja."}</p>
     <div class="toolbar"><input type="month" id="month" value="${esc(gastosMonth)}" style="max-width:200px"><button class="btn primary" id="add">+ Nuevo gasto</button></div>
-    <div class="tiles"><div class="tile"><div class="k">Total del mes</div><div class="v">${esc(money(total))}</div><div class="s">${expenses.length} gasto(s)</div></div></div>
+    <div class="tiles"><div class="tile"><div class="k">Gastos del negocio</div><div class="v">${esc(money(total))}</div><div class="s">${expenses.length} gasto(s)</div></div>
+      ${isAdmin() ? `<div class="tile"><div class="k">Pagado a proveedores</div><div class="v">${esc(money(paidSuppliers))}</div><div class="s">${supPays.length} pago(s) por compras de mercancía</div></div>
+      <div class="tile"><div class="k">Total de salidas del mes</div><div class="v">${esc(money(total + paidSuppliers))}</div><div class="s">gastos + pagos a proveedores</div></div>
+      <div class="tile"><div class="k">Compras registradas</div><div class="v">${esc(money(purchases.total))}</div><div class="s">${purchases.count} compra(s)${purchases.owed > 0 ? ` · aún debes ${esc(money(purchases.owed))}` : ""}</div></div>` : ""}</div>
+    ${isAdmin() ? `<div class="note">Para cuadrar el mes usa <b>Total de salidas</b>: es todo el dinero que salió de la caja y del banco. En el Resumen,
+      la <b>Ganancia real</b> no resta las compras otra vez, porque el costo de cada producto ya se descuenta cuando se vende;
+      las compras pagadas sí se restan en el <b>Flujo de caja</b>.</div>` : ""}
     ${Object.keys(byCat).length > 1 ? `<div class="card"><h3>Por categoría</h3><table class="t"><tbody>${Object.entries(byCat).sort((a, b) => b[1] - a[1])
       .map(([c, a]) => `<tr><td>${esc(c)}</td><td class="r money">${esc(money(a))}</td></tr>`).join("")}</tbody></table></div>` : ""}
     <div class="card"><ul class="list" id="list">${expenses.length ? expenses.map((e, i) => `<li><div class="main">
@@ -1095,7 +1110,14 @@ views.gastos = async (view) => {
       <div class="muted">${esc(fmtDate(e.spent_at))} · ${esc(METHOD_LABEL[e.method] || e.method)}${e.description ? " · " + esc(e.description) : ""}
         ${e.supplier_name ? " · " + esc(e.supplier_name) : ""}${e.user_name ? " · " + esc(e.user_name) : ""}</div></div>
       ${isAdmin() ? `<div class="actions"><button class="btn small danger" data-del="${i}">Eliminar</button></div>` : ""}</li>`).join("")
-      : `<li class="empty">Sin gastos en este mes.</li>`}</ul></div>`;
+      : `<li class="empty">Sin gastos en este mes.</li>`}</ul></div>
+    ${isAdmin() ? `<div class="card"><h3>Pagos a proveedores del mes</h3><ul class="list" id="sup-list">${supPays.length ? supPays.map((x, i) => `<li><div class="main">
+      <div class="title">${esc(x.supplier_name)} · <span class="money ${x.amount < 0 ? "pos" : ""}">${esc(money(x.amount))}</span></div>
+      <div class="muted">${esc(fmtDate(x.created_at))} · ${esc(METHOD_LABEL[x.method] || x.method)} · compra ${esc(x.number)}${x.note ? " · " + esc(x.note) : ""}${x.user_name ? " · " + esc(x.user_name) : ""}</div></div>
+      <div class="actions"><button class="btn small" data-pur="${i}">Ver compra</button></div></li>`).join("")
+      : `<li class="empty">Sin pagos a proveedores en este mes. Las compras se registran en la pestaña Compras.</li>`}</ul></div>` : ""}`;
+  const supList = $("#sup-list", view);
+  if (supList) supList.onclick = (ev) => { const i = ev.target.dataset.pur; if (i !== undefined) guarded(() => purchaseDetail(supPays[i].purchase_id)); };
   $("#month", view).onchange = (ev) => { if (ev.target.value) { gastosMonth = ev.target.value; go("gastos"); } };
   $("#add", view).onclick = async () => {
     const suppliers = isAdmin() ? await api("GET", "api/suppliers") : [];

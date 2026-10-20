@@ -52,6 +52,9 @@ su código está en el historial de git (commit `abf58e9`) por si se vuelve a in
   `invoices.tax_included = 1` en las facturas nuevas; las anteriores a esta regla tienen 0 (el IVA se sumaba
   aparte) y conservan su total. `_with_totals` devuelve `subtotal`, `tax_amount` y `total` según esa marca;
   devoluciones, resumen y PDF también la respetan.
+- **Gastos y compras**: la pestaña Gastos muestra (solo admin) también lo pagado a proveedores y el "Total de
+  salidas" (gastos + pagos a proveedores) para cuadrar el mes. La ganancia real del resumen NO resta las compras
+  (el costo ya se descuenta al vender); el `cash_flow` del resumen sí (cobrado − gastos − pagado a proveedores).
 - Descuento por línea en %. Numeración `FAC-0001` y `COM-0001` en `company`.
 - **Consumidor final**: venta de mostrador sin cliente registrado (`client_id` NULL, documento 222222222222).
   No se permite vender a crédito sin un cliente registrado.

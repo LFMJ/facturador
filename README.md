@@ -42,7 +42,9 @@ FACTURADOR_API_KEY=clave-de-prueba python -m flask --app app run --port 5050
   actualiza el costo (promedio ponderado); compras a crédito con abonos y
   saldo por pagar a cada proveedor.
 - **Gastos** del negocio por categoría (arriendo, servicios, nómina…), que se
-  restan para mostrar la **ganancia real**.
+  restan para mostrar la **ganancia real**; junto con lo **pagado a
+  proveedores** dan el **total de salidas del mes** para cuadrar caja y banco.
+  El resumen incluye el **flujo de caja** (cobrado − gastos − pagos a proveedores).
 - **Cierre de caja** diario: cuánto debería haber por método de pago (cobros −
   devoluciones − pagos a proveedores − gastos + base) contra lo contado, por
   vendedor o de todos.
