@@ -574,7 +574,7 @@ views.resumen = async (view) => {
   const q = `start=${from / 1000}&end=${to / 1000}&tz=${new Date().getTimezoneOffset()}`;
   const d = await api("GET", `api/dashboard?${q}`);
   const s = d.summary;
-  const margin = s.net > 0 ? Math.round((s.profit / s.net) * 100) : 0;
+  const margin = s.total > 0 ? Math.round((s.profit / s.total) * 100) : 0;
   const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
   view.innerHTML = `<h2>Resumen de ventas</h2>
     <div class="chips" id="presets" style="margin-top:12px">${PRESETS.map(([k, l]) =>
@@ -582,7 +582,7 @@ views.resumen = async (view) => {
     <div class="tiles">
       <div class="tile"><div class="k">Ventas (con ${esc(company.tax_label || "impuesto")})</div><div class="v">${esc(money(s.total))}</div>
         <div class="s">${plural(s.count, "factura")}${s.returns ? ` · devoluciones ${esc(money(s.returns))}` : ""}</div></div>
-      <div class="tile"><div class="k">Ganancia en ventas</div><div class="v">${esc(money(s.profit))}</div><div class="s">${margin}% sobre ventas sin impuesto</div></div>
+      <div class="tile"><div class="k">Ganancia en ventas</div><div class="v">${esc(money(s.profit))}</div><div class="s">${margin}% de lo vendido (ventas − costo)</div></div>
       <div class="tile"><div class="k">Gastos</div><div class="v">${esc(money(s.expenses))}</div><div class="s">arriendo, servicios, nómina…</div></div>
       <div class="tile"><div class="k">Ganancia real</div><div class="v ${s.net_profit < 0 ? "neg" : ""}">${esc(money(s.net_profit))}</div><div class="s">ganancia en ventas − gastos</div></div>
       <div class="tile"><div class="k">Cobrado en el período</div><div class="v">${esc(money(d.collected.total))}</div><div class="s">${esc(d.collected.by_method.map((m) => METHOD_LABEL[m.method] || m.method).join(" · ") || "sin pagos")}</div></div>
@@ -602,7 +602,7 @@ views.resumen = async (view) => {
     <div class="card"><h3>Ventas por ${d.series.unit === "month" ? "mes" : "día"}</h3><div id="chart"></div>
       <p class="muted" style="margin:8px 0 0">Promedio por factura: <span class="money">${esc(money(s.avg_ticket))}</span>
       · Descuentos: <span class="money">${esc(money(s.discount))}</span> · ${esc(company.tax_label || "Impuesto")}: <span class="money">${esc(money(s.tax))}</span></p></div>
-    <div class="card"><h3>Productos más vendidos</h3>${d.top_products.length ? `<table class="t"><thead><tr><th>Producto</th><th class="r">Cant.</th><th class="r">Ventas sin imp.</th></tr></thead><tbody>
+    <div class="card"><h3>Productos más vendidos</h3>${d.top_products.length ? `<table class="t"><thead><tr><th>Producto</th><th class="r">Cant.</th><th class="r">Vendido</th></tr></thead><tbody>
       ${d.top_products.map((p) => `<tr><td>${esc(p.name)}</td><td class="r">${fmtNum(p.qty)}</td><td class="r money">${esc(money(p.net))}</td></tr>`).join("")}</tbody></table>`
       : `<p class="muted">Sin ventas en este período.</p>`}</div>
     <div class="card"><h3>Gastos por categoría</h3>${d.expenses_by_category.length ? `<table class="t"><tbody>

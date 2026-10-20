@@ -45,6 +45,9 @@ su código está en el historial de git (commit `abf58e9`) por si se vuelve a in
 - **Compras** (`purchases`): suman stock y recalculan `products.cost_price` con promedio ponderado. Pagos al
   proveedor en `supplier_payments`. Anular una compra exige que el stock alcance para restarla.
 - `invoice_items.unit_cost` guarda el costo al vender (para la ganancia). Costo y ganancia solo los ve el admin.
+- **Ganancia = lo cobrado (con IVA, menos devoluciones) − costo.** El negocio no declara IVA: los productos
+  llegan con el impuesto ya pagado al proveedor, así que el IVA no se le quita al precio para calcular la
+  ganancia (el desglose de IVA en la factura es solo informativo).
 - **Cierre de caja**: esperado por método = cobros − dinero devuelto a clientes − pagos a proveedores + dinero
   devuelto por proveedores − gastos (+ base en efectivo), filtrado por `user_id`. Un cierre por día y por persona (o "todos"). El vendedor solo ve su caja.
 - **El precio de los productos YA INCLUYE el IVA.** Total de la factura = suma de las líneas (cantidad × precio

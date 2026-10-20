@@ -1958,6 +1958,11 @@ def dashboard():
         v = i["qty"] * i["price"] * ((1 - (i["discount"] or 0) / 100) if with_discount else 1)
         return v / (1 + (i["tax_rate"] or 0) / 100) if i["tax_included"] else v
 
+    def charged(i):
+        """Lo que se cobró por la línea (con IVA), como lo pagó el cliente."""
+        v = i["qty"] * i["price"] * (1 - (i["discount"] or 0) / 100)
+        return v if i["tax_included"] else v * (1 + (i["tax_rate"] or 0) / 100)
+
     gross = sum(base(i, with_discount=False) for i in items)
     net = sum(base(i) for i in items)
     cost = sum(i["qty"] * (i["cost"] or 0) for i in items)
@@ -1967,19 +1972,21 @@ def dashboard():
     ret_cost = sum(r["cost"] or 0 for r in rets)
     expense_total = sum(e["amount"] for e in expenses)
     sales_net = net - ret_net
-    profit = sales_net - (cost - ret_cost)
+    # Ganancia = lo que se cobró (precio con IVA, ya descontadas devoluciones) − lo que costó la mercancía.
+    # El IVA ya viene pagado desde el proveedor, así que no se resta otra vez del precio de venta.
+    profit = (total - ret_total) - (cost - ret_cost)
 
     products = {}
     for i in items:
         key = i["product_id"] or i["description"]
         p = products.setdefault(key, {"name": i["description"], "qty": 0, "net": 0.0})
         p["qty"] += i["qty"]
-        p["net"] += base(i)
+        p["net"] += charged(i)
     for r in ret_items:
         key = r["product_id"] or r["description"]
         if key in products:
             products[key]["qty"] -= r["qty"]
-            products[key]["net"] -= r["amount"] / (1 + (r["tax_rate"] or 0) / 100)
+            products[key]["net"] -= r["amount"]
 
     sellers = {}
     for inv in invoices:
