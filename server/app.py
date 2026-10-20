@@ -3,7 +3,7 @@ API del Facturador y versión web (static/index.html).
 
 Módulos: empresa, clientes (con estado de cuenta), proveedores (con saldo por
 pagar), productos (inventario y categorías), facturas (descuento por línea,
-estado de pago, anulación, devoluciones parciales y enlace público del PDF),
+estado de pago, anulación y devoluciones parciales),
 compras a proveedores, gastos, cierre de caja, usuarios, registro de
 actividad, resumen de ventas y copias de seguridad.
 
@@ -173,6 +173,7 @@ MIGRATIONS = [
     # para no marcarlas como pendientes ni como pagadas sin saberlo.
     ("invoices", "payment_tracking", "ALTER TABLE invoices ADD COLUMN payment_tracking INTEGER DEFAULT 0"),
     ("invoices", "client_id", "ALTER TABLE invoices ADD COLUMN client_id TEXT"),
+    # public_token: enlaces públicos de facturas, ya retirados (la columna queda sin uso)
     ("invoices", "public_token", "ALTER TABLE invoices ADD COLUMN public_token TEXT"),
     ("invoice_items", "product_id", "ALTER TABLE invoice_items ADD COLUMN product_id TEXT"),
     ("invoice_items", "discount", "ALTER TABLE invoice_items ADD COLUMN discount REAL DEFAULT 0"),
@@ -664,8 +665,6 @@ def _statement(conn, cid):
     active = [i for i in invoices if i["status"] != "anulada"]
     tracked = [i for i in active if i["payment_tracking"]]
     pending = [i for i in active if i["payment_status"] in ("pendiente", "abono")]
-    for inv in pending:
-        _ensure_token(conn, inv)
     return {
         "client": dict(client),
         "invoices": invoices,
@@ -675,7 +674,7 @@ def _statement(conn, cid):
             "paid": money(sum(i["paid"] for i in tracked)),
             "balance": money(sum(i["balance"] for i in pending)),
             "pending": [{"id": i["id"], "number": i["number"], "created_at": i["created_at"],
-                         "balance": i["balance"], "public_token": i["public_token"]} for i in pending],
+                         "balance": i["balance"]} for i in pending],
         },
     }
 
@@ -904,13 +903,6 @@ def _invoice_rows(conn, where="", params=(), order="ORDER BY i.created_at DESC")
     return [_with_totals(r) for r in conn.execute(f"{INVOICE_SELECT} {where} {order}", params).fetchall()]
 
 
-def _ensure_token(conn, inv):
-    if not inv.get("public_token"):
-        inv["public_token"] = secrets.token_urlsafe(16)
-        conn.execute("UPDATE invoices SET public_token=? WHERE id=?", (inv["public_token"], inv["id"]))
-    return inv["public_token"]
-
-
 def _load_invoice(conn, iid):
     rows = _invoice_rows(conn, "WHERE i.id=?", (iid,))
     if not rows:
@@ -1022,13 +1014,12 @@ def create_invoice():
                 conn.execute(
                     """INSERT INTO invoices (id, number, created_at, client_name, client_doc,
                        client_address, client_phone, client_email, tax_rate, notes, warranty, seller,
-                       status, user_id, user_name, payment_tracking, client_id, public_token)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'activa',?,?,?,?,?)""",
+                       status, user_id, user_name, payment_tracking, client_id)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'activa',?,?,?,?)""",
                     (invoice_id, number, now, text(client, "name"), text(client, "doc"),
                      text(client, "address"), text(client, "phone"), text(client, "email"),
                      tax_rate, text(d, "notes"), text(d, "warranty"), text(d, "seller"),
-                     user["id"], user["name"], 1 if payment is not None else 0, client_id,
-                     secrets.token_urlsafe(16)),
+                     user["id"], user["name"], 1 if payment is not None else 0, client_id),
                 )
                 for pid, qty, price, discount in parsed:
                     product = products[pid]
@@ -1064,42 +1055,16 @@ def create_invoice():
     raise ApiError("No se pudo generar un número de factura único.", 500)
 
 
-def _invoice_pdf_response(conn, inv, inline=False):
-    company = _company(conn)
-    buf = io.BytesIO()
-    generate_invoice_pdf(inv, company, buf)
-    buf.seek(0)
-    return send_file(buf, mimetype="application/pdf", download_name=f'{inv["number"]}.pdf', as_attachment=not inline)
-
-
 @app.get("/api/invoices/<iid>/pdf")
 @require_auth()
 def invoice_pdf(iid):
     with get_conn() as conn:
-        return _invoice_pdf_response(conn, _load_invoice(conn, iid))
-
-
-@app.post("/api/invoices/<iid>/share")
-@require_auth()
-def share_invoice(iid):
-    """Devuelve el enlace público del PDF (para enviarlo por WhatsApp)."""
-    with get_conn() as conn:
         inv = _load_invoice(conn, iid)
-        token = _ensure_token(conn, inv)
-    return jsonify({"path": f"/f/{token}", "public_token": token})
-
-
-@app.get("/f/<token>")
-def public_invoice(token):
-    """Enlace público de una factura: cualquiera con el enlace (largo y aleatorio) ve el PDF."""
-    if len(token) < 16:
-        return "Enlace no válido.", 404
-    with get_conn() as conn:
-        row = conn.execute("SELECT id FROM invoices WHERE public_token=?", (token,)).fetchone()
-        if not row:
-            return "Factura no encontrada. Pide al negocio un enlace nuevo.", 404
-        g.user = {"role": "vendedor"}  # sin costos
-        return _invoice_pdf_response(conn, _load_invoice(conn, row["id"]), inline=True)
+        company = _company(conn)
+    buf = io.BytesIO()
+    generate_invoice_pdf(inv, company, buf)
+    buf.seek(0)
+    return send_file(buf, mimetype="application/pdf", download_name=f'{inv["number"]}.pdf')
 
 
 def _void_invoice(iid, reason):

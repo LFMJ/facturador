@@ -509,25 +509,62 @@ function waLink(phone, message) {
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
 
-// Abre la ventana antes de esperar al servidor: si no, el celular la bloquea como ventana emergente.
-async function openWhatsApp(buildLink) {
-  const w = window.open("", "_blank");
-  try {
-    const link = await buildLink();
-    if (w) w.location.href = link; else location.href = link;
-  } catch (e) {
-    if (w) w.close();
-    throw e;
-  }
+// Envía un PDF por WhatsApp como archivo adjunto (sin enlaces a la página).
+// En el celular se usa el menú "Compartir" del teléfono: la persona elige WhatsApp y el chat.
+// Se prepara el PDF antes de mostrar el botón, porque el navegador solo permite compartir
+// justo después de un toque (si se espera al servidor, lo bloquea).
+// Si el navegador no puede adjuntar archivos (algunos computadores), se descarga el PDF y se abre
+// el chat del cliente en WhatsApp para adjuntarlo a mano.
+async function whatsappPdf({ title, path, filename, phone, contactName, message }) {
+  const dlg = $("#modal");
+  if (dlg.open) await closeModal(dlg);
+  showDialog(`<h2>${esc(title)}</h2>
+    <p class="muted" id="wa-status">Preparando el PDF…</p>
+    <div class="btns" style="flex-direction:column">
+      <button type="button" class="btn good block" id="wa-go" disabled>Enviar por WhatsApp</button>
+      <button class="btn block" value="close">Cancelar</button></div>`, async (form, dlg) => {
+    const status = $("#wa-status", form), btn = $("#wa-go", form);
+    let file;
+    try {
+      const r = await api("GET", path, undefined, { raw: true });
+      file = new File([await r.blob()], filename, { type: "application/pdf" });
+    } catch (e) {
+      status.textContent = `No se pudo preparar el PDF: ${e.message}`;
+      return;
+    }
+    const canShare = !!navigator.canShare?.({ files: [file] });
+    status.innerHTML = canShare
+      ? `Se abrirá el menú para compartir: elige <b>WhatsApp</b> y luego el chat de <b>${esc(contactName || "tu cliente")}</b>.
+         El PDF llega como documento adjunto.`
+      : `Este navegador no puede adjuntar archivos a WhatsApp. Se descargará el PDF y se abrirá el chat de
+         <b>${esc(contactName || "tu cliente")}</b>: adjunta allí el archivo descargado (o arrástralo).`;
+    btn.textContent = canShare ? "Enviar por WhatsApp" : "Descargar PDF y abrir WhatsApp";
+    btn.disabled = false;
+    btn.onclick = async () => {
+      if (canShare) {
+        try { await navigator.share({ files: [file] }); dlg.close(); }
+        catch (e) { if (e.name !== "AbortError") toast(`No se pudo compartir: ${e.message}`, true); }
+        return;
+      }
+      const url = URL.createObjectURL(file);
+      const a = Object.assign(document.createElement("a"), { href: url, download: filename });
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      window.open(waLink(phone, message), "_blank");
+      dlg.close();
+    };
+  });
 }
 
-async function shareInvoiceWhatsApp(inv) {
-  await openWhatsApp(async () => {
-    const r = await api("POST", `api/invoices/${inv.id}/share`);
-    const name = (inv.client_name || "").split(" ")[0];
-    const msg = `Hola${name ? " " + name : ""}, te enviamos tu factura ${inv.number} de ${company.name || "nuestro negocio"} por ${money(inv.total)}.\n` +
-      `Puedes verla y descargarla aquí: ${location.origin}${r.path}\n¡Gracias por tu compra!`;
-    return waLink(inv.client_phone, msg);
+const safeName = (v) => String(v || "").replace(/[\\/:*?"<>|]+/g, " ").trim();
+
+function shareInvoiceWhatsApp(inv) {
+  const name = (inv.client_name || "").split(" ")[0];
+  return whatsappPdf({
+    title: `Enviar ${inv.number} por WhatsApp`, path: `api/invoices/${inv.id}/pdf`,
+    filename: `Factura ${inv.number}${company.name ? " - " + safeName(company.name) : ""}.pdf`,
+    phone: inv.client_phone, contactName: inv.client_name,
+    message: `Hola${name ? " " + name : ""}, te envío tu factura ${inv.number} de ${company.name || "nuestro negocio"} por ${money(inv.total)} (va adjunta en PDF). ¡Gracias por tu compra!`,
   });
 }
 
@@ -608,7 +645,7 @@ async function clientStatement(client) {
       : `<p class="muted">Este cliente todavía no tiene facturas.</p>`}
     <div class="btns" style="margin-top:14px">
       <button type="button" class="btn" data-act="pdf">PDF</button>
-      ${s.balance > 0 ? `<button type="button" class="btn good" data-act="wa">Recordar por WhatsApp</button>` : ""}
+      <button type="button" class="btn good" data-act="wa">${s.balance > 0 ? "Recordar por WhatsApp" : "Enviar por WhatsApp"}</button>
       <button class="btn primary" value="close">Cerrar</button></div>`, (form) => {
     form.onclick = async (ev) => {
       const act = ev.target.dataset.act;
@@ -618,10 +655,15 @@ async function clientStatement(client) {
         ev.target.disabled = false;
       }
       if (act === "wa") {
-        const lines = s.pending.map((p) => `• ${p.number} (${fmtDate(p.created_at)}): ${money(p.balance)} — ${location.origin}/f/${p.public_token}`);
-        const msg = `Hola ${c.name.split(" ")[0]}, te escribimos de ${company.name || "nuestro negocio"}. ` +
-          `Te recordamos que tienes un saldo pendiente de ${money(s.balance)}:\n${lines.join("\n")}\n¡Gracias!`;
-        guarded(() => openWhatsApp(async () => waLink(c.phone, msg)));
+        const lines = s.pending.map((p) => `• ${p.number} (${fmtDate(p.created_at)}): ${money(p.balance)}`);
+        guarded(() => whatsappPdf({
+          title: "Enviar estado de cuenta por WhatsApp", path: `api/clients/${c.id}/statement.pdf`,
+          filename: `Estado de cuenta - ${safeName(c.name)}.pdf`, phone: c.phone, contactName: c.name,
+          message: s.balance > 0
+            ? `Hola ${c.name.split(" ")[0]}, te escribimos de ${company.name || "nuestro negocio"}. ` +
+              `Te recordamos que tienes un saldo pendiente de ${money(s.balance)}:\n${lines.join("\n")}\nTe adjunto el estado de cuenta en PDF. ¡Gracias!`
+            : `Hola ${c.name.split(" ")[0]}, te envío tu estado de cuenta de ${company.name || "nuestro negocio"} (adjunto en PDF).`,
+        }));
       }
     };
   });

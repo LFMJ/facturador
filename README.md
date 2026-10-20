@@ -25,13 +25,14 @@ FACTURADOR_API_KEY=clave-de-prueba python -m flask --app app run --port 5050
 
 - **Facturas**: los artículos salen del catálogo y descuentan el inventario;
   descuento por línea; pagada ahora o a crédito (con abono); PDF para descargar
-  o compartir y **envío por WhatsApp** con un enlace a la factura.
+  y **envío por WhatsApp con el PDF adjunto** (desde el menú "Compartir" del
+  celular; en el computador se descarga y se abre el chat del cliente).
 - **Historial**: estado de pago (pagada, abono, pendiente), cobros, filtro
   "Por cobrar", **devoluciones parciales** (el stock vuelve y, si el cliente ya
   había pagado, se registra el dinero devuelto) y anulación (las facturas no se
   borran, para no dejar huecos en la numeración).
 - **Clientes**: saldo de cada uno, **estado de cuenta** en PDF y **recordatorio
-  de pago por WhatsApp**.
+  de pago por WhatsApp** con el estado de cuenta adjunto.
 - **Productos** con **categorías**, existencias y costo.
 - **Compras a proveedores**: la mercancía que llega suma al inventario y
   actualiza el costo (promedio ponderado); compras a crédito con abonos y

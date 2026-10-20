@@ -17,8 +17,11 @@ su código está en el historial de git (commit `abf58e9`) por si se vuelve a in
 - **`server/pdf_gen.py`**: PDF de factura y de estado de cuenta (reportlab). Todo texto del usuario pasa por
   `_t()` (escape), porque `Paragraph` interpreta `<`, `>` y `&` como marcado. Fechas con `format_date_es`
   (no `strftime('%B')`, sale en inglés).
-- **Enlace público de factura**: `/f/<public_token>` sirve el PDF sin sesión (token aleatorio de 16 bytes);
-  se usa para enviarla por WhatsApp (`wa.me`, el indicativo de país sale de `company.phone_country`).
+- **WhatsApp**: `whatsappPdf()` en la web envía el PDF **como archivo adjunto** con `navigator.share({files})`
+  (menú "Compartir" del celular; el PDF se descarga antes de mostrar el botón porque `share` exige un toque
+  reciente). Si el navegador no puede compartir archivos, descarga el PDF y abre `wa.me/<número>` con un
+  texto (el indicativo sale de `company.phone_country`). No se envían enlaces a la página: no hay rutas
+  públicas para ver facturas (la columna `invoices.public_token` quedó sin uso).
 - **Copias de seguridad**: `auto_backup()` (before_request) guarda una por día en `backups/` (se conservan 14);
   `/api/backup` descarga una copia al momento (API de backup de SQLite).
 - **Registro de actividad**: `log(conn, entidad, id, resumen)` dentro de la misma transacción de cada cambio.
