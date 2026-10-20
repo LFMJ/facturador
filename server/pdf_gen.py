@@ -206,6 +206,15 @@ def generate_invoice_pdf(invoice: dict, company: dict, output_path: str):
         Paragraph("<b>Total</b>", ParagraphStyle("totlbl", fontName="Times-Bold", fontSize=12, textColor=INK)),
         Paragraph(f"<b>{fmt_money(total, currency)}</b>", ParagraphStyle("totval", fontName="Times-Bold", fontSize=12, textColor=INK, alignment=TA_RIGHT)),
     ])
+    returned = float(invoice.get("returned") or 0)
+    if returned > 0:
+        totals_rows.append([Paragraph("Devoluciones", style_td), Paragraph(f"- {fmt_money(returned, currency)}", style_td_r)])
+        totals_rows.append([
+            Paragraph("<b>Total final</b>", ParagraphStyle("totlbl2", fontName="Times-Bold", fontSize=12, textColor=INK)),
+            Paragraph(f"<b>{fmt_money(total - returned, currency)}</b>",
+                      ParagraphStyle("totval2", fontName="Times-Bold", fontSize=12, textColor=INK, alignment=TA_RIGHT)),
+        ])
+        total -= returned
     totals_table = Table(totals_rows, colWidths=[35 * mm, 35 * mm], hAlign="RIGHT")
     last_row = len(totals_rows) - 1
     totals_table.setStyle(TableStyle([
@@ -221,13 +230,27 @@ def generate_invoice_pdf(invoice: dict, company: dict, output_path: str):
         paid = sum(float(p.get("amount") or 0) for p in invoice.get("payments") or [])
         balance = round(total - paid, 2)
         methods = sorted({PAYMENT_LABELS.get(p.get("method"), p.get("method") or "") for p in invoice.get("payments") or []})
-        if balance <= 0.004:
+        if total <= 0.004 and returned > 0:
+            text = "DEVUELTA EN SU TOTALIDAD"
+        elif balance <= 0.004:
             text = "PAGADA" + (f" · {', '.join(methods)}" if methods else "")
         else:
             text = (f"Abonado: {_t(fmt_money(paid, company.get('currency') or '$'))} · "
                     f"<b>Saldo pendiente: {_t(fmt_money(balance, company.get('currency') or '$'))}</b>")
         story.append(Spacer(1, 6))
         story.append(Paragraph(text, ParagraphStyle("paystate", parent=style_co_meta, alignment=TA_RIGHT)))
+
+    if invoice.get("returns"):
+        story.append(Spacer(1, 14))
+        story.append(Paragraph("DEVOLUCIONES", style_label))
+        for r in invoice["returns"]:
+            detail = ", ".join(f'{float(x["qty"]):g} × {x["description"]}' for x in r.get("items") or [])
+            line = f'{format_date_es(r["created_at"])} · {detail} · {fmt_money(r["amount"], company.get("currency") or "$")}'
+            if r.get("reason"):
+                line += f' · {r["reason"]}'
+            if float(r.get("refund") or 0) > 0:
+                line += f' · se devolvieron {fmt_money(r["refund"], company.get("currency") or "$")}'
+            story.append(Paragraph(_t(line), style_footer))
 
     if invoice.get("status") == "anulada":
         story.append(Spacer(1, 14))
@@ -257,3 +280,87 @@ def generate_invoice_pdf(invoice: dict, company: dict, output_path: str):
         doc.build(story, onFirstPage=_void_stamp, onLaterPages=_void_stamp)
     else:
         doc.build(story)
+
+
+STATUS_LABELS = {"pagada": "Pagada", "abono": "Abono", "pendiente": "Pendiente", "anulada": "Anulada",
+                 "sin_registro": "Sin registro", "devuelta": "Devuelta"}
+
+
+def generate_statement_pdf(statement: dict, company: dict, output_path):
+    """Estado de cuenta de un cliente: sus facturas, lo pagado y el saldo pendiente."""
+    client, summary = statement["client"], statement["summary"]
+    currency = company.get("currency") or "$"
+    doc = SimpleDocTemplate(output_path, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm,
+                            topMargin=18 * mm, bottomMargin=18 * mm, title=f"Estado de cuenta {client.get('name', '')}")
+    title = ParagraphStyle("st_title", fontName="Times-Bold", fontSize=18, textColor=INK, alignment=TA_RIGHT, leading=22)
+    meta = ParagraphStyle("st_meta", fontName="Courier", fontSize=9, textColor=INK_SOFT, alignment=TA_RIGHT, leading=13)
+    co_name = ParagraphStyle("st_co", fontName="Times-Bold", fontSize=14, textColor=INK, leading=18)
+    co_meta = ParagraphStyle("st_cometa", fontName="Helvetica", fontSize=9, textColor=INK_SOFT, leading=13)
+    label = ParagraphStyle("st_label", fontName="Helvetica-Bold", fontSize=8.5, textColor=BRASS, spaceAfter=4)
+    body = ParagraphStyle("st_body", fontName="Helvetica", fontSize=10, textColor=INK, leading=14)
+    th = ParagraphStyle("st_th", fontName="Helvetica-Bold", fontSize=8.5, textColor=INK_SOFT)
+    th_r = ParagraphStyle("st_thr", parent=th, alignment=TA_RIGHT)
+    td = ParagraphStyle("st_td", fontName="Helvetica", fontSize=9.5, textColor=colors.HexColor("#1E1E1E"), leading=13)
+    td_r = ParagraphStyle("st_tdr", parent=td, alignment=TA_RIGHT)
+
+    left = []
+    if company.get("logo_blob"):
+        try:
+            img = Image(io.BytesIO(company["logo_blob"]))
+            img._restrictSize(45 * mm, 20 * mm)
+            left += [img, Spacer(1, 4)]
+        except Exception:
+            pass
+    left.append(Paragraph(_t(company.get("name") or "Empresa"), co_name))
+    for line in [company.get("tax_id"), company.get("address"),
+                 " · ".join(x for x in [company.get("phone"), company.get("email")] if x)]:
+        if line:
+            left.append(Paragraph(_t(line), co_meta))
+    right = [Paragraph("ESTADO DE CUENTA", title), Paragraph(format_date_es(datetime.datetime.now()), meta)]
+    header = Table([[left, right]], colWidths=[100 * mm, 70 * mm])
+    header.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+    story = [header, Spacer(1, 8), HRFlowable(width="100%", thickness=1.4, color=INK), Spacer(1, 14),
+             Paragraph("CLIENTE", label)]
+    for line in [client.get("name"), client.get("doc"), client.get("address"),
+                 " · ".join(x for x in [client.get("phone"), client.get("email")] if x)]:
+        if line:
+            story.append(Paragraph(_t(line), body))
+    story.append(Spacer(1, 14))
+
+    rows = [[Paragraph(h, th) for h in ("FACTURA", "FECHA", "ESTADO")] +
+            [Paragraph(h, th_r) for h in ("TOTAL", "PAGADO", "SALDO")]]
+    for inv in statement["invoices"]:
+        voided = inv.get("status") == "anulada"
+        tracked = inv.get("payment_tracking")
+        rows.append([
+            Paragraph(_t(inv["number"]), td),
+            Paragraph(datetime.datetime.fromtimestamp(inv["created_at"]).strftime("%d/%m/%Y"), td),
+            Paragraph(_t(STATUS_LABELS.get(inv["payment_status"], inv["payment_status"])), td),
+            Paragraph(_t(fmt_money(inv["total"], currency)), td_r),
+            Paragraph(_t(fmt_money(inv["paid"], currency)) if tracked and not voided else "—", td_r),
+            Paragraph(_t(fmt_money(inv["balance"], currency)) if tracked and not voided else "—", td_r),
+        ])
+    if len(rows) == 1:
+        rows.append([Paragraph("Sin facturas.", td), "", "", "", "", ""])
+    table = Table(rows, colWidths=[26 * mm, 24 * mm, 28 * mm, 31 * mm, 30 * mm, 31 * mm])
+    table.setStyle(TableStyle([
+        ("LINEBELOW", (0, 0), (-1, 0), 1, INK), ("LINEBELOW", (0, 1), (-1, -1), 0.5, LINE),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    story += [table, Spacer(1, 12)]
+
+    big = ParagraphStyle("st_big", fontName="Times-Bold", fontSize=12, textColor=INK)
+    big_r = ParagraphStyle("st_bigr", parent=big, alignment=TA_RIGHT)
+    totals = Table([
+        [Paragraph("Total comprado", td), Paragraph(_t(fmt_money(summary["total"], currency)), td_r)],
+        [Paragraph("Total pagado", td), Paragraph(_t(fmt_money(summary["paid"], currency)), td_r)],
+        [Paragraph("<b>Saldo pendiente</b>", big), Paragraph(f"<b>{_t(fmt_money(summary['balance'], currency))}</b>", big_r)],
+    ], colWidths=[40 * mm, 40 * mm], hAlign="RIGHT")
+    totals.setStyle(TableStyle([("LINEABOVE", (0, 2), (-1, 2), 1.2, INK), ("TOPPADDING", (0, 2), (-1, 2), 8)]))
+    story.append(totals)
+    if company.get("footer_note"):
+        story += [Spacer(1, 18), HRFlowable(width="100%", thickness=0.6, color=LINE), Spacer(1, 8),
+                  Paragraph(_t(company["footer_note"]), co_meta)]
+    doc.build(story)

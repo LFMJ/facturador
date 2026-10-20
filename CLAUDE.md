@@ -1,69 +1,66 @@
 # Facturador
 
-App de escritorio en Python (CustomTkinter) para facturar en PDF, con un servidor Flask propio
-donde se guarda todo. Interfaz y mensajes de error en **español**.
+Sistema de facturación **web** (celular y computador) con un servidor Flask + SQLite propio, desplegado en
+PythonAnywhere. Interfaz y mensajes de error en **español**. La app de escritorio (CustomTkinter) se retiró;
+su código está en el historial de git (commit `abf58e9`) por si se vuelve a integrar.
 
 ## Arquitectura
 
-- **Cliente de escritorio** (raíz): `main.py` (asistente de conexión), `app.py` (ventana y navegación),
-  una `tab_*.py` por pestaña (empresa, clientes, proveedores, productos, factura, historial).
-- **`db.py`**: cliente HTTP hacia el servidor. Todas las funciones reciben un `Server(base_url, api_key, token)`.
-  No hay SQL en el cliente. Los errores se lanzan como `db.DBError` con mensaje listo para mostrar al usuario.
-- **`server/app.py`**: API Flask + SQLite (`facturador_server.db`). Desplegada en PythonAnywhere
-  (ver `server/DEPLOY.md`). Todas las rutas `/api/*` (salvo `/api/login`) usan `@require_auth()` o
-  `@require_auth(admin=True)`: aceptan `Authorization: Bearer <token>` (sesión de un usuario, tabla
-  `sessions`, se guarda solo el sha256 del token) o `X-API-Key` (clave maestra = administrador). El
-  usuario actual queda en `g.user`. Roles: `admin` y `vendedor`.
+- **`server/app.py`**: toda la API y las rutas de la web. Todas las rutas `/api/*` (salvo `/api/login`) usan
+  `@require_auth()` o `@require_auth(admin=True)`: aceptan `Authorization: Bearer <token>` (sesión de un
+  usuario, tabla `sessions`, se guarda solo el sha256 del token) o `X-API-Key` (clave maestra = administrador).
+  El usuario actual queda en `g.user`. Roles: `admin` y `vendedor`.
+- **`server/static/index.html`**: la aplicación web (HTML + JS sin frameworks ni build). Una función
+  `views.<pestaña>` por pestaña; `ALL_TABS` define cuáles ve cada rol. Todo texto del usuario va por `esc()`
+  antes de `innerHTML`. Diálogos con `openForm()` (formularios) y `showDialog()` (contenido libre); para
+  encadenar un diálogo tras otro usar `await closeModal(dlg)`, no `dlg.close()`.
+- **`server/pdf_gen.py`**: PDF de factura y de estado de cuenta (reportlab). Todo texto del usuario pasa por
+  `_t()` (escape), porque `Paragraph` interpreta `<`, `>` y `&` como marcado. Fechas con `format_date_es`
+  (no `strftime('%B')`, sale en inglés).
+- **Enlace público de factura**: `/f/<public_token>` sirve el PDF sin sesión (token aleatorio de 16 bytes);
+  se usa para enviarla por WhatsApp (`wa.me`, el indicativo de país sale de `company.phone_country`).
 - **Copias de seguridad**: `auto_backup()` (before_request) guarda una por día en `backups/` (se conservan 14);
-  `/api/backup` descarga una copia al momento (API de backup de SQLite, consistente con la app en uso).
-- **Versión web**: `server/static/index.html` (HTML + JS sin frameworks ni build), servida en `/`. Usa la
-  misma API con el token (o la clave maestra) guardado en `localStorage`. Todo texto del usuario va por `esc()` antes de `innerHTML`.
-  El PDF lo genera el servidor en `/api/invoices/<id>/pdf` importando `pdf_gen.py` (que en PythonAnywhere
-  se sube junto a `app.py`).
-- **`pdf_gen.py`**: PDF con reportlab. Todo texto del usuario pasa por `_t()` (escape), porque `Paragraph`
-  interpreta `<`, `>` y `&` como marcado. La fecha se formatea con `format_date_es` (no usar `strftime('%B')`,
-  sale en inglés según el locale del sistema).
-- **`config.py`**: guarda URL, token de sesión y último usuario en `~/.facturador/config.json` (por equipo;
-  nunca la contraseña). `login.py` tiene el formulario de acceso; las pestañas visibles dependen del rol
-  (`TABS` en `app.py`).
+  `/api/backup` descarga una copia al momento (API de backup de SQLite).
+- **Registro de actividad**: `log(conn, entidad, id, resumen)` dentro de la misma transacción de cada cambio.
+  Toda ruta nueva que modifique datos debe registrar su actividad.
 
 ## Reglas de negocio importantes
 
 - Los artículos de una factura se eligen **siempre desde el catálogo** (`product_id`), nunca texto libre.
-- Al crear una factura el servidor descuenta stock (sumando líneas repetidas del mismo producto) y registra
-  `stock_movements`; si no alcanza el stock responde 400 con el detalle.
-- Las facturas **no se borran**: se anulan (`status='anulada'`, motivo, quién y cuándo) y el stock se
-  restaura. `DELETE /api/invoices/<id>` también anula (compatibilidad con apps viejas).
-- Pagos en la tabla `payments`. Estado calculado en `_with_totals`: pagada / abono / pendiente / anulada /
-  sin_registro (`payment_tracking=0`: facturas anteriores al registro de pagos o de apps viejas).
-- `invoice_items.unit_cost` guarda el costo al momento de vender (para la ganancia del resumen). El costo
-  y la ganancia solo los ve el administrador.
-- El descuento es **por línea, en %**, y se aplica antes del impuesto.
-- La numeración (`FAC-0001`) la lleva el servidor (`company.invoice_counter`).
-- Columnas nuevas en el servidor se agregan a la lista `MIGRATIONS` de `server/app.py` (ALTER TABLE
-  idempotente) para no romper la base ya desplegada. No cambies el esquema sin añadir su migración.
+- Al facturar se descuenta stock (sumando líneas repetidas del mismo producto); si no alcanza responde 400.
+- Las facturas **no se borran**: se anulan (`status='anulada'`) y se restaura el stock no devuelto antes.
+  `DELETE /api/invoices/<id>` también anula (compatibilidad con apps viejas).
+- **Devoluciones parciales** (`returns` / `return_items`): suben el stock y bajan el total de la factura
+  (`total` = facturado − devuelto; `original_total` = facturado). Si el cliente ya había pagado más que el
+  nuevo total, se registra un pago **negativo** (dinero devuelto).
+- Pagos en `payments`. Estado calculado en `_with_totals`: pagada / abono / pendiente / anulada / devuelta /
+  sin_registro (`payment_tracking=0`: facturas anteriores al registro de pagos).
+- **Compras** (`purchases`): suman stock y recalculan `products.cost_price` con promedio ponderado. Pagos al
+  proveedor en `supplier_payments`. Anular una compra exige que el stock alcance para restarla.
+- `invoice_items.unit_cost` guarda el costo al vender (para la ganancia). Costo y ganancia solo los ve el admin.
+- **Cierre de caja**: esperado por método = cobros − dinero devuelto − pagos a proveedores − gastos (+ base en
+  efectivo), filtrado por `user_id`. Un cierre por día y por persona (o "todos"). El vendedor solo ve su caja.
+- Descuento por línea en %, antes del impuesto. Numeración `FAC-0001` y `COM-0001` en `company`.
+- Columnas nuevas se agregan a `MIGRATIONS` en `server/app.py` (ALTER TABLE idempotente) para no romper la
+  base desplegada. No cambies el esquema sin añadir su migración.
 
 ## Comandos
 
 ```bash
-pip install -r requirements.txt
-python main.py                              # app de escritorio
-cd server && FACTURADOR_API_KEY=test123 python -m flask --app app run --port 5050   # servidor local
-python -m PyInstaller --noconfirm --windowed --name Facturador main.py              # .exe (en Windows)
+cd server && pip install -r requirements.txt
+FACTURADOR_API_KEY=test123 python -m flask --app app run --port 5050   # http://127.0.0.1:5050
 ```
-
-- En Windows usar `python -m PyInstaller`, no `pyinstaller` (suele no estar en el PATH).
-- El ejecutable válido está en `dist/Facturador/`, no en `build/`. Se reparte la carpeta completa.
 
 ## Pruebas
 
-No hay suite automática. El servidor se puede probar con `app.test_client()` usando las variables
-`FACTURADOR_DB` y `FACTURADOR_BACKUPS` para no tocar la base real. Para probar la GUI sin pantalla: `xvfb-run -a python3 script.py` con el servidor
-local levantado **en el mismo comando** (cada llamada de shell es una sesión nueva). Conviene envolver con
-`timeout`, porque una ventana modal abierta cuelga el proceso.
+No hay suite en el repositorio. El servidor se prueba con `app.test_client()` usando las variables
+`FACTURADOR_DB` y `FACTURADOR_BACKUPS` para no tocar la base real. La web se prueba con Playwright contra el
+servidor local (levantarlo **en el mismo comando** de shell; cada llamada es una sesión nueva).
 
-## Cuidado
+## Despliegue (PythonAnywhere)
 
-- La clave de API por defecto en `server/app.py` es `cambia-esta-clave`; la real se define al desplegar
-  y **no debe commitearse**.
-- `*.db` está en `.gitignore`: no subir bases de datos con datos reales.
+- Se sube el contenido de `server/` a `/home/<usuario>/facturador_server/` y se da "Reload" (ver
+  `server/DEPLOY.md`). La base se migra sola al arrancar.
+- La clave maestra va en el archivo WSGI (`os.environ["FACTURADOR_API_KEY"]`), **nunca** en el repositorio.
+  El WSGI debe hacer `sys.path.insert(0, ...)`: en `/home/<usuario>/` puede haber un `app.py` viejo.
+- `*.db` y `backups/` están en `.gitignore`: no subir bases de datos con datos reales.

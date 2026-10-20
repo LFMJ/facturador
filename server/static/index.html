@@ -79,6 +79,9 @@
   .badge.low, .badge.pendiente, .badge.anulada { background: #FBEEEC; color: var(--red); }
   .badge.abono { background: #FFF4DC; color: var(--amber); }
   .badge.pagada { background: #E8F3EC; color: var(--green); }
+  .badge.devuelta { background: #EEF0F4; color: var(--ink-soft); }
+  .neg { color: var(--red) !important; }
+  .pos { color: var(--green) !important; }
   .badge.admin { background: #EEE8DA; color: var(--brass); }
 
   .line-item { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 10px; background: #fff; }
@@ -172,10 +175,11 @@
 const AUTH_STORAGE = "facturador_auth";
 const PAYMENT_METHODS = [["efectivo", "Efectivo"], ["transferencia", "Transferencia"], ["tarjeta", "Tarjeta"], ["otro", "Otro"]];
 const METHOD_LABEL = Object.fromEntries(PAYMENT_METHODS);
-const STATUS_LABEL = { pagada: "Pagada", abono: "Abono", pendiente: "Pendiente", anulada: "Anulada", sin_registro: "Sin registro de pago" };
+const STATUS_LABEL = { pagada: "Pagada", abono: "Abono", pendiente: "Pendiente", anulada: "Anulada", sin_registro: "Sin registro de pago", devuelta: "Devuelta" };
 const ALL_TABS = [
-  ["resumen", "Resumen", true], ["factura", "Nueva factura"], ["historial", "Historial"], ["productos", "Productos"],
-  ["clientes", "Clientes"], ["proveedores", "Proveedores", true], ["empresa", "Mi empresa", true], ["usuarios", "Usuarios", true],
+  ["resumen", "Resumen", true], ["factura", "Nueva factura"], ["historial", "Historial"], ["caja", "Caja"], ["clientes", "Clientes"],
+  ["productos", "Productos"], ["compras", "Compras", true], ["proveedores", "Proveedores", true], ["gastos", "Gastos"],
+  ["empresa", "Mi empresa", true], ["usuarios", "Usuarios", true], ["actividad", "Actividad", true],
 ];
 let auth = null;      // {mode: "token"|"key", secret, user}
 let company = {};
@@ -250,14 +254,14 @@ function openForm(title, fields, values = {}, submitLabel = "Guardar", intro = "
       } else {
         const t = f.type || "text";
         input = `<input name="${f.name}" type="${t}" value="${esc(v)}" ${f.required ? "required" : ""}
-          ${t === "number" ? `step="any" inputmode="decimal"` : ""} ${f.autocomplete ? `autocomplete="${f.autocomplete}"` : ""}
+          ${t === "number" ? `step="any" inputmode="decimal"` : ""} ${f.autocomplete ? `autocomplete="${f.autocomplete}"` : ""} ${f.list ? `list="${f.list}"` : ""}
           placeholder="${esc(f.placeholder || "")}">`;
       }
       return `<label class="f"><span>${esc(f.label)}${f.required ? " *" : ""}</span>${input}${f.help ? `<span class="muted" style="font-size:.8rem">${esc(f.help)}</span>` : ""}</label>`;
     }).join("") + `<div id="form-error" class="errors hidden"></div>
       <div class="btns"><button class="btn" value="cancel" formnovalidate>Cancelar</button>
       <button class="btn primary" value="ok">${esc(submitLabel)}</button></div>`;
-    form.onclick = null;
+    form.onclick = null; form.oninput = null;
     form.onsubmit = (ev) => {
       if (ev.submitter?.value !== "ok") return;
       const fd = new FormData(form);
@@ -287,8 +291,8 @@ function openForm(title, fields, values = {}, submitLabel = "Guardar", intro = "
 function showDialog(html, onReady) {
   const dlg = $("#modal"), form = $("#modal-form");
   form.innerHTML = html;
-  form.onsubmit = null;
-  dlg.returnData = null;
+  form.onsubmit = null; form.onclick = null; form.oninput = null;
+  dlg.returnData = null; dlg.returnValue = ""; dlg.next = null;
   dlg.onclose = null;
   dlg.showModal();
   onReady?.(form, dlg);
@@ -492,28 +496,73 @@ function barChart(points, unit) {
   return wrap;
 }
 
+// ---------- ayudas compartidas ----------
+const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const methodOptions = (sel = "efectivo") => PAYMENT_METHODS.map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${l}</option>`).join("");
+const PENDING = ["pendiente", "abono"];
+
+// Número para WhatsApp: si no trae indicativo de país se le agrega el de la empresa (57 = Colombia).
+function waLink(phone, message) {
+  const raw = String(phone || "").trim();
+  let digits = raw.replace(/\D/g, "");
+  if (digits && !raw.startsWith("+") && digits.length <= 10) digits = (company.phone_country || "57") + digits.replace(/^0+/, "");
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
+
+// Abre la ventana antes de esperar al servidor: si no, el celular la bloquea como ventana emergente.
+async function openWhatsApp(buildLink) {
+  const w = window.open("", "_blank");
+  try {
+    const link = await buildLink();
+    if (w) w.location.href = link; else location.href = link;
+  } catch (e) {
+    if (w) w.close();
+    throw e;
+  }
+}
+
+async function shareInvoiceWhatsApp(inv) {
+  await openWhatsApp(async () => {
+    const r = await api("POST", `api/invoices/${inv.id}/share`);
+    const name = (inv.client_name || "").split(" ")[0];
+    const msg = `Hola${name ? " " + name : ""}, te enviamos tu factura ${inv.number} de ${company.name || "nuestro negocio"} por ${money(inv.total)}.\n` +
+      `Puedes verla y descargarla aquí: ${location.origin}${r.path}\n¡Gracias por tu compra!`;
+    return waLink(inv.client_phone, msg);
+  });
+}
+
+// ---------- resumen (administrador) ----------
 views.resumen = async (view) => {
   const [from, to] = rangeFor(resumenPreset);
   const q = `start=${from / 1000}&end=${to / 1000}&tz=${new Date().getTimezoneOffset()}`;
   const d = await api("GET", `api/dashboard?${q}`);
   const s = d.summary;
   const margin = s.net > 0 ? Math.round((s.profit / s.net) * 100) : 0;
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
   view.innerHTML = `<h2>Resumen de ventas</h2>
     <div class="chips" id="presets" style="margin-top:12px">${PRESETS.map(([k, l]) =>
       `<button class="chip ${k === resumenPreset ? "active" : ""}" data-p="${k}">${l}</button>`).join("")}</div>
     <div class="tiles">
-      <div class="tile"><div class="k">Ventas (con ${esc(company.tax_label || "impuesto")})</div><div class="v">${esc(money(s.total))}</div><div class="s">${s.count} factura${s.count === 1 ? "" : "s"}</div></div>
-      <div class="tile"><div class="k">Ganancia estimada</div><div class="v">${esc(money(s.profit))}</div><div class="s">${margin}% sobre ventas sin impuesto</div></div>
+      <div class="tile"><div class="k">Ventas (con ${esc(company.tax_label || "impuesto")})</div><div class="v">${esc(money(s.total))}</div>
+        <div class="s">${plural(s.count, "factura")}${s.returns ? ` · devoluciones ${esc(money(s.returns))}` : ""}</div></div>
+      <div class="tile"><div class="k">Ganancia en ventas</div><div class="v">${esc(money(s.profit))}</div><div class="s">${margin}% sobre ventas sin impuesto</div></div>
+      <div class="tile"><div class="k">Gastos</div><div class="v">${esc(money(s.expenses))}</div><div class="s">arriendo, servicios, nómina…</div></div>
+      <div class="tile"><div class="k">Ganancia real</div><div class="v ${s.net_profit < 0 ? "neg" : ""}">${esc(money(s.net_profit))}</div><div class="s">ganancia en ventas − gastos</div></div>
       <div class="tile"><div class="k">Cobrado en el período</div><div class="v">${esc(money(d.collected.total))}</div><div class="s">${esc(d.collected.by_method.map((m) => METHOD_LABEL[m.method] || m.method).join(" · ") || "sin pagos")}</div></div>
-      <div class="tile"><div class="k">Por cobrar (total)</div><div class="v">${esc(money(d.receivables.total))}</div><div class="s">${d.receivables.count} factura${d.receivables.count === 1 ? "" : "s"} con saldo</div></div>
+      <div class="tile"><div class="k">Te deben (clientes)</div><div class="v">${esc(money(d.receivables.total))}</div><div class="s">${plural(d.receivables.count, "factura")} con saldo</div></div>
+      <div class="tile"><div class="k">Debes (proveedores)</div><div class="v">${esc(money(d.payables.total))}</div><div class="s">${plural(d.payables.count, "compra")} con saldo</div></div>
+      <div class="tile"><div class="k">Compras de mercancía</div><div class="v">${esc(money(d.purchases.total))}</div><div class="s">${plural(d.purchases.count, "compra")} en el período</div></div>
     </div>
-    ${s.items_without_cost ? `<div class="note">${s.items_without_cost} artículo(s) vendidos no tienen precio de costo, así que la ganancia aparece más alta de lo real. Pon el costo en Productos.</div>` : ""}
+    ${s.items_without_cost ? `<div class="note">${s.items_without_cost} artículo(s) vendidos no tienen precio de costo, así que la ganancia aparece más alta de lo real. Pon el costo en Productos o registra la compra en Compras.</div>` : ""}
     <div class="card"><h3>Ventas por ${d.series.unit === "month" ? "mes" : "día"}</h3><div id="chart"></div>
       <p class="muted" style="margin:8px 0 0">Promedio por factura: <span class="money">${esc(money(s.avg_ticket))}</span>
       · Descuentos: <span class="money">${esc(money(s.discount))}</span> · ${esc(company.tax_label || "Impuesto")}: <span class="money">${esc(money(s.tax))}</span></p></div>
     <div class="card"><h3>Productos más vendidos</h3>${d.top_products.length ? `<table class="t"><thead><tr><th>Producto</th><th class="r">Cant.</th><th class="r">Ventas sin imp.</th></tr></thead><tbody>
       ${d.top_products.map((p) => `<tr><td>${esc(p.name)}</td><td class="r">${fmtNum(p.qty)}</td><td class="r money">${esc(money(p.net))}</td></tr>`).join("")}</tbody></table>`
       : `<p class="muted">Sin ventas en este período.</p>`}</div>
+    <div class="card"><h3>Gastos por categoría</h3>${d.expenses_by_category.length ? `<table class="t"><tbody>
+      ${d.expenses_by_category.map((e) => `<tr><td>${esc(e.category)}</td><td class="r money">${esc(money(e.amount))}</td></tr>`).join("")}</tbody></table>`
+      : `<p class="muted">Sin gastos registrados en este período.</p>`}</div>
     <div class="card"><h3>Por vendedor</h3>${d.by_seller.length ? `<table class="t"><thead><tr><th>Vendedor</th><th class="r">Facturas</th><th class="r">Ventas</th></tr></thead><tbody>
       ${d.by_seller.map((p) => `<tr><td>${esc(p.name)}</td><td class="r">${p.count}</td><td class="r money">${esc(money(p.total))}</td></tr>`).join("")}</tbody></table>`
       : `<p class="muted">Sin ventas en este período.</p>`}</div>
@@ -532,7 +581,7 @@ const CLIENT_FIELDS = [
   { name: "name", label: "Nombre / razón social", required: true },
   { name: "doc", label: "Documento (NIT / CC)" },
   { name: "address", label: "Dirección" },
-  { name: "phone", label: "Teléfono", type: "tel" },
+  { name: "phone", label: "Teléfono / WhatsApp", type: "tel", help: "Con este número se envían las facturas y recordatorios por WhatsApp." },
   { name: "email", label: "Correo", type: "email", validate: emailOk },
 ];
 
@@ -545,28 +594,74 @@ async function editClient(c = {}) {
   });
 }
 
+async function clientStatement(client) {
+  const st = await api("GET", `api/clients/${client.id}/statement`);
+  const s = st.summary, c = st.client;
+  showDialog(`<h2>Estado de cuenta</h2>
+    <p class="muted" style="margin-top:-8px">${esc(c.name)}${c.doc ? " · " + esc(c.doc) : ""}${c.phone ? " · " + esc(c.phone) : ""}</p>
+    <div class="totals"><div><span>Total comprado</span><span class="money">${esc(money(s.total))}</span></div>
+      <div><span>Pagado</span><span class="money">${esc(money(s.paid))}</span></div>
+      <div class="grand"><span>Saldo pendiente</span><span class="money">${esc(money(s.balance))}</span></div></div>
+    ${st.invoices.length ? `<table class="t"><thead><tr><th>Factura</th><th>Estado</th><th class="r">Saldo</th></tr></thead><tbody>
+      ${st.invoices.slice().reverse().map((i) => `<tr><td>${esc(i.number)}<div class="muted" style="font-size:.8rem">${esc(fmtDate(i.created_at))} · ${esc(money(i.total))}</div></td>
+        <td>${badge(i.payment_status)}</td><td class="r money">${PENDING.includes(i.payment_status) ? esc(money(i.balance)) : "—"}</td></tr>`).join("")}</tbody></table>`
+      : `<p class="muted">Este cliente todavía no tiene facturas.</p>`}
+    <div class="btns" style="margin-top:14px">
+      <button type="button" class="btn" data-act="pdf">PDF</button>
+      ${s.balance > 0 ? `<button type="button" class="btn good" data-act="wa">Recordar por WhatsApp</button>` : ""}
+      <button class="btn primary" value="close">Cerrar</button></div>`, (form) => {
+    form.onclick = async (ev) => {
+      const act = ev.target.dataset.act;
+      if (act === "pdf") {
+        ev.target.disabled = true;
+        await guarded(() => downloadBlob(`api/clients/${c.id}/statement.pdf`, `Estado de cuenta - ${c.name}.pdf`, "application/pdf"));
+        ev.target.disabled = false;
+      }
+      if (act === "wa") {
+        const lines = s.pending.map((p) => `• ${p.number} (${fmtDate(p.created_at)}): ${money(p.balance)} — ${location.origin}/f/${p.public_token}`);
+        const msg = `Hola ${c.name.split(" ")[0]}, te escribimos de ${company.name || "nuestro negocio"}. ` +
+          `Te recordamos que tienes un saldo pendiente de ${money(s.balance)}:\n${lines.join("\n")}\n¡Gracias!`;
+        guarded(() => openWhatsApp(async () => waLink(c.phone, msg)));
+      }
+    };
+  });
+}
+
 views.clientes = async (view) => {
   const clients = await api("GET", "api/clients");
+  const owed = clients.filter((c) => c.balance > 0).length;
   view.innerHTML = `<h2>Clientes</h2>
     <div class="toolbar"><input type="search" placeholder="Buscar cliente…"><button class="btn primary" id="add">+ Nuevo</button></div>
+    <div class="chips" id="filters"><button class="chip active" data-f="todos">Todos</button><button class="chip" data-f="deben">Con saldo (${owed})</button></div>
     <div class="card"><ul class="list" id="list"></ul></div>`;
+  let onlyOwed = false, lastQ = "";
   $("#add", view).onclick = async () => { if (await editClient()) go("clientes"); };
-  searchable(view, (q) => {
-    const rows = clients.filter((c) => [c.name, c.doc, c.phone, c.email].join(" ").toLowerCase().includes(q));
+  const render = (q) => {
+    lastQ = q;
+    const rows = clients.filter((c) => (!onlyOwed || c.balance > 0) && [c.name, c.doc, c.phone, c.email].join(" ").toLowerCase().includes(q));
     $("#list", view).innerHTML = rows.length ? rows.map((c, i) => `<li><div class="main">
         <div class="title">${esc(c.name)}</div>
-        <div class="muted">${esc([c.doc, c.phone, c.email].filter(Boolean).join(" · "))}</div></div>
-        <div class="actions"><button class="btn small" data-edit="${i}">Editar</button>
+        <div class="muted">${esc([c.doc, c.phone, c.email].filter(Boolean).join(" · "))}</div>
+        ${c.balance > 0 ? `<div style="margin-top:3px"><span class="badge pendiente">Debe <span class="money">${esc(money(c.balance))}</span></span></div>` : ""}</div>
+        <div class="actions"><button class="btn small" data-st="${i}">Estado de cuenta</button><button class="btn small" data-edit="${i}">Editar</button>
         ${isAdmin() ? `<button class="btn small danger" data-del="${i}">Eliminar</button>` : ""}</div></li>`).join("")
       : `<li class="empty">${clients.length ? "Sin resultados." : "Aún no hay clientes."}</li>`;
     $("#list", view).onclick = async (ev) => {
       const e = ev.target.dataset;
+      if (e.st) guarded(() => clientStatement(rows[e.st]));
       if (e.edit) { if (await editClient(rows[e.edit])) go("clientes"); }
       if (e.del && confirm(`¿Eliminar a ${rows[e.del].name}? Sus facturas no se borran.`)) {
         await guarded(async () => { await api("DELETE", `api/clients/${rows[e.del].id}`); toast("Cliente eliminado."); go("clientes"); });
       }
     };
-  });
+  };
+  $("#filters", view).onclick = (ev) => {
+    const f = ev.target.dataset.f; if (!f) return;
+    onlyOwed = f === "deben";
+    view.querySelectorAll("#filters .chip").forEach((c) => c.classList.toggle("active", c.dataset.f === f));
+    render(lastQ);
+  };
+  searchable(view, render);
 };
 
 // ---------- proveedores (administrador) ----------
@@ -579,8 +674,10 @@ const SUPPLIER_FIELDS = [
 
 views.proveedores = async (view) => {
   const suppliers = await api("GET", "api/suppliers");
+  const owed = suppliers.reduce((a, s) => a + s.balance, 0);
   view.innerHTML = `<h2>Proveedores</h2>
     <div class="toolbar"><input type="search" placeholder="Buscar proveedor…"><button class="btn primary" id="add">+ Nuevo</button></div>
+    ${owed > 0 ? `<p class="muted">Les debes en total: <b class="money">${esc(money(owed))}</b></p>` : ""}
     <div class="card"><ul class="list" id="list"></ul></div>`;
   const edit = async (s = {}) => {
     const data = await openForm(s.id ? "Editar proveedor" : "Nuevo proveedor", SUPPLIER_FIELDS, s);
@@ -595,12 +692,14 @@ views.proveedores = async (view) => {
     const rows = suppliers.filter((s) => [s.name, s.contact_name, s.phone, s.email].join(" ").toLowerCase().includes(q));
     $("#list", view).innerHTML = rows.length ? rows.map((s, i) => `<li><div class="main">
         <div class="title">${esc(s.name)}</div>
-        <div class="muted">${esc([s.contact_name, s.phone, s.email].filter(Boolean).join(" · "))}</div></div>
-        <div class="actions"><button class="btn small" data-edit="${i}">Editar</button>
+        <div class="muted">${esc([s.contact_name, s.phone, s.email].filter(Boolean).join(" · "))}</div>
+        ${s.balance > 0 ? `<div style="margin-top:3px"><span class="badge abono">Le debes <span class="money">${esc(money(s.balance))}</span></span></div>` : ""}</div>
+        <div class="actions"><button class="btn small" data-buy="${i}">Compras</button><button class="btn small" data-edit="${i}">Editar</button>
         <button class="btn small danger" data-del="${i}">Eliminar</button></div></li>`).join("")
       : `<li class="empty">${suppliers.length ? "Sin resultados." : "Aún no hay proveedores."}</li>`;
     $("#list", view).onclick = async (ev) => {
       const e = ev.target.dataset;
+      if (e.buy) { comprasSupplier = rows[e.buy]; go("compras"); }
       if (e.edit) edit(rows[e.edit]);
       if (e.del && confirm(`¿Eliminar a ${rows[e.del].name}?`)) {
         await guarded(async () => { await api("DELETE", `api/suppliers/${rows[e.del].id}`); toast("Proveedor eliminado."); go("proveedores"); });
@@ -610,23 +709,32 @@ views.proveedores = async (view) => {
 };
 
 // ---------- productos ----------
+let productCategory = "";
+const categoriesOf = (products) => [...new Set(products.map((p) => p.category || "").filter(Boolean))].sort((a, b) => a.localeCompare(b));
+const categoryDatalist = (id, cats) => `<datalist id="${id}">${cats.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>`;
+
 views.productos = async (view) => {
   const admin = isAdmin();
   const [products, suppliers] = await Promise.all([api("GET", "api/products"), admin ? api("GET", "api/suppliers") : []]);
+  const cats = categoriesOf(products);
+  if (productCategory && !cats.includes(productCategory) && productCategory !== "__none") productCategory = "";
   const fields = [
     { name: "name", label: "Nombre", required: true },
+    { name: "category", label: "Categoría", placeholder: "ej. Herramientas", list: "cat-list" },
     { name: "price", label: `Precio de venta (${company.currency || "$"})`, type: "number", required: true,
       validate: (v) => v > 0 ? null : "El precio debe ser mayor que cero." },
-    { name: "cost_price", label: "Precio de costo", type: "number", default: 0, help: "Se usa para calcular la ganancia en el Resumen.",
+    { name: "cost_price", label: "Precio de costo", type: "number", default: 0, help: "Se actualiza solo al registrar compras. Se usa para la ganancia.",
       validate: (v) => v === null || v >= 0 ? null : "El costo no puede ser negativo." },
-    { name: "stock_qty", label: "Existencias (stock)", type: "number", default: 0,
+    { name: "stock_qty", label: "Existencias (stock)", type: "number", default: 0, help: "Para mercancía que llega, mejor usa Compras: suma el stock y actualiza el costo.",
       validate: (v) => v === null || v >= 0 ? null : "Las existencias no pueden ser negativas." },
     { name: "unit", label: "Unidad", placeholder: "unidad, hora, caja…", default: "unidad" },
-    { name: "supplier_id", label: "Proveedor", type: "select",
+    { name: "supplier_id", label: "Proveedor habitual", type: "select",
       options: [{ value: "", label: "— sin proveedor —" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))] },
   ];
-  view.innerHTML = `<h2>Productos</h2>
+  view.innerHTML = `<h2>Productos</h2>${categoryDatalist("cat-list", cats)}
     <div class="toolbar"><input type="search" placeholder="Buscar producto…">${admin ? `<button class="btn primary" id="add">+ Nuevo</button>` : ""}</div>
+    ${cats.length ? `<div class="chips" id="cats"><button class="chip" data-c="">Todas</button>${cats.map((c) =>
+      `<button class="chip" data-c="${esc(c)}">${esc(c)}</button>`).join("")}<button class="chip" data-c="__none">Sin categoría</button></div>` : ""}
     <div class="card"><ul class="list" id="list"></ul></div>`;
   const edit = async (p = {}) => {
     const data = await openForm(p.id ? "Editar producto" : "Nuevo producto", fields, p);
@@ -638,23 +746,27 @@ views.productos = async (view) => {
     });
   };
   const restock = async (p) => {
-    const data = await openForm(`Reabastecer: ${p.name}`, [
-      { name: "qty", label: `Cantidad que ingresa (hay ${fmtNum(p.stock_qty)})`, type: "number", required: true,
+    const data = await openForm(`Ajustar stock: ${p.name}`, [
+      { name: "qty", label: `Cantidad que se suma (hay ${fmtNum(p.stock_qty)})`, type: "number", required: true,
         validate: (v) => v > 0 ? null : "La cantidad debe ser mayor que cero." },
-      { name: "note", label: "Nota (opcional)", placeholder: "ej. factura del proveedor 123" },
-    ], {}, "Sumar al stock");
+      { name: "note", label: "Motivo", placeholder: "ej. conteo de inventario" },
+    ], {}, "Sumar al stock", `<div class="note">Si es mercancía comprada a un proveedor, regístrala en <b>Compras</b>: así queda el costo y lo que le debes.</div>`);
     if (!data) return;
     await guarded(async () => { await api("POST", `api/products/${p.id}/restock`, data); toast("Stock actualizado."); go("productos"); });
   };
-  if (admin) $("#add", view).onclick = () => edit();
-  searchable(view, (q) => {
-    const rows = products.filter((p) => [p.name, p.supplier_name].join(" ").toLowerCase().includes(q));
+  if (admin) $("#add", view).onclick = () => edit({ category: productCategory && productCategory !== "__none" ? productCategory : "" });
+  let lastQ = "";
+  const render = (q) => {
+    lastQ = q;
+    view.querySelectorAll("#cats .chip").forEach((c) => c.classList.toggle("active", c.dataset.c === productCategory));
+    const rows = products.filter((p) => (!productCategory || (productCategory === "__none" ? !p.category : p.category === productCategory))
+      && [p.name, p.supplier_name, p.category].join(" ").toLowerCase().includes(q));
     $("#list", view).innerHTML = rows.length ? rows.map((p, i) => `<li><div class="main">
-        <div class="title">${esc(p.name)}</div>
+        <div class="title">${esc(p.name)} ${p.category ? `<span class="badge">${esc(p.category)}</span>` : ""}</div>
         <div class="muted"><span class="money">${esc(money(p.price))}</span> / ${esc(p.unit || "unidad")}
           · <span class="badge ${(p.stock_qty || 0) <= 0 ? "low" : ""}">Stock: ${fmtNum(p.stock_qty)}</span>
-          ${p.supplier_name ? " · " + esc(p.supplier_name) : ""}</div></div>
-        ${admin ? `<div class="actions"><button class="btn small" data-restock="${i}">+ Stock</button>
+          ${admin ? ` · costo <span class="money">${esc(money(p.cost_price))}</span>` : ""}${p.supplier_name ? " · " + esc(p.supplier_name) : ""}</div></div>
+        ${admin ? `<div class="actions"><button class="btn small" data-restock="${i}">Ajustar stock</button>
         <button class="btn small" data-edit="${i}">Editar</button>
         <button class="btn small danger" data-del="${i}">Eliminar</button></div>` : ""}</li>`).join("")
       : `<li class="empty">${products.length ? "Sin resultados." : "Aún no hay productos."}</li>`;
@@ -666,7 +778,330 @@ views.productos = async (view) => {
         await guarded(async () => { await api("DELETE", `api/products/${rows[e.del].id}`); toast("Producto eliminado."); go("productos"); });
       }
     };
+  };
+  const catsEl = $("#cats", view);
+  if (catsEl) catsEl.onclick = (ev) => { if (ev.target.dataset.c !== undefined) { productCategory = ev.target.dataset.c; render(lastQ); } };
+  searchable(view, render);
+};
+
+// Selector de producto agrupado por categoría (para facturas y compras).
+function productSelectOptions(products, sel, { disableEmpty = false } = {}) {
+  const groups = {};
+  for (const p of products) (groups[p.category || ""] ||= []).push(p);
+  const opt = (p) => `<option value="${esc(p.id)}" ${p.id === sel ? "selected" : ""} ${disableEmpty && (p.stock_qty || 0) <= 0 && p.id !== sel ? "disabled" : ""}>${esc(p.name)} (stock: ${fmtNum(p.stock_qty)})</option>`;
+  const names = Object.keys(groups).sort((a, b) => (a === "") - (b === "") || a.localeCompare(b));
+  return `<option value="">— elegir producto —</option>` + (names.length === 1 && names[0] === "" ? groups[""].map(opt).join("")
+    : names.map((n) => `<optgroup label="${esc(n || "Sin categoría")}">${groups[n].map(opt).join("")}</optgroup>`).join(""));
+}
+
+// ---------- compras a proveedores (administrador) ----------
+let comprasSupplier = null;
+const PURCHASE_FILTERS = [["todas", "Todas"], ["por_pagar", "Por pagar"], ["pagada", "Pagadas"], ["anulada", "Anuladas"]];
+let comprasFilter = "todas";
+
+async function purchaseDetail(id) {
+  const p = await api("GET", `api/purchases/${id}`);
+  showDialog(`<h2>${esc(p.number)} ${badge(p.payment_status)}</h2>
+    <p class="muted" style="margin-top:-8px">${esc(fmtDateTime(p.created_at))} · ${esc(p.supplier_name)}${p.supplier_ref ? ` · factura del proveedor ${esc(p.supplier_ref)}` : ""}
+      ${p.user_name ? `<br>Registrada por ${esc(p.user_name)}` : ""}</p>
+    ${p.status === "anulada" ? `<div class="errors">Anulada el ${esc(fmtDateTime(p.voided_at))}${p.voided_by ? ` por ${esc(p.voided_by)}` : ""}: ${esc(p.void_reason)}</div>` : ""}
+    <table class="t"><thead><tr><th>Producto</th><th class="r">Cant.</th><th class="r">Costo</th><th class="r">Total</th></tr></thead><tbody>
+      ${p.items.map((it) => `<tr><td>${esc(it.description)}</td><td class="r">${fmtNum(it.qty)}</td><td class="r money">${esc(money(it.unit_cost))}</td>
+        <td class="r money">${esc(money(it.qty * it.unit_cost))}</td></tr>`).join("")}</tbody></table>
+    <div class="totals"><div><span>Total</span><span class="money">${esc(money(p.total))}</span></div>
+      <div><span>Pagado</span><span class="money">${esc(money(p.paid))}</span></div>
+      <div class="grand"><span>Le debes</span><span class="money">${esc(money(p.balance))}</span></div></div>
+    <h3>Pagos al proveedor</h3>
+    ${p.payments.length ? `<table class="t"><tbody>${p.payments.map((x) => `<tr><td>${esc(fmtDateTime(x.created_at))}<div class="muted" style="font-size:.8rem">
+      ${esc(METHOD_LABEL[x.method] || x.method)}${x.user_name ? ` · ${esc(x.user_name)}` : ""}${x.note ? ` · ${esc(x.note)}` : ""}</div></td>
+      <td class="r money">${esc(money(x.amount))}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">Sin pagos todavía.</p>`}
+    ${p.notes ? `<p class="muted">Notas: ${esc(p.notes)}</p>` : ""}
+    <div class="btns" style="margin-top:14px">
+      ${p.status !== "anulada" && p.balance > 0 ? `<button type="button" class="btn good" data-act="pay">Registrar pago</button>` : ""}
+      ${p.status !== "anulada" ? `<button type="button" class="btn danger" data-act="void">Anular</button>` : ""}
+      <button class="btn primary" value="close">Cerrar</button></div>`, (form, dlg) => {
+    form.onclick = async (ev) => {
+      const act = ev.target.dataset.act;
+      if (act === "pay") {
+        await closeModal(dlg);
+        const data = await openForm(`Pago a ${p.supplier_name}`, [
+          { name: "amount", label: "Monto pagado", type: "number", required: true, default: p.balance,
+            validate: (v) => v > 0 ? null : "El monto debe ser mayor que cero." },
+          { name: "method", label: "Método de pago", type: "select", options: PAYMENT_METHODS.map(([value, label]) => ({ value, label })) },
+          { name: "note", label: "Nota (opcional)" },
+        ], {}, "Registrar pago", `<p class="muted">${esc(p.number)} · Le debes <b>${esc(money(p.balance))}</b></p>`);
+        if (data) await guarded(async () => { await api("POST", `api/purchases/${p.id}/payments`, data); toast("Pago registrado."); });
+        go("compras");
+      }
+      if (act === "void") {
+        await closeModal(dlg);
+        const data = await openForm(`Anular ${p.number}`, [{ name: "reason", label: "Motivo", required: true }], {}, "Anular compra",
+          `<div class="note">Se resta del inventario lo que entró con esta compra. El costo promedio de los productos no se recalcula.</div>`);
+        if (data) await guarded(async () => { await api("POST", `api/purchases/${p.id}/void`, data); toast("Compra anulada."); });
+        go("compras");
+      }
+    };
   });
+}
+
+function purchaseForm(view, products, suppliers) {
+  const state = { lines: [] };
+  const byId = Object.fromEntries(products.map((p) => [p.id, p]));
+  view.innerHTML = `<h2>Nueva compra</h2>
+    <p class="muted">Registra la mercancía que llega: el stock sube y el costo de cada producto se actualiza (promedio).</p>
+    <div id="errors" class="errors hidden"></div>
+    <div class="card"><div class="grid2">
+      <label class="f"><span>Proveedor *</span><select id="supplier"><option value="">— elegir proveedor —</option>${suppliers.map((s) =>
+        `<option value="${esc(s.id)}" ${comprasSupplier?.id === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></label>
+      <label class="f"><span>N.º de factura del proveedor (opcional)</span><input id="ref"></label></div>
+      ${suppliers.length ? "" : `<p class="muted">Primero crea el proveedor en la pestaña Proveedores.</p>`}</div>
+    <div class="card"><div class="muted" style="margin-bottom:8px">Productos que llegan</div><div id="lines"></div>
+      <button class="btn" id="add-line">+ Añadir producto</button></div>
+    <div class="card">
+      <label class="f"><span>Notas (opcional)</span><input id="notes"></label>
+      <div class="totals"><div class="grand"><span>Total de la compra</span><span class="money" id="total"></span></div></div>
+      <div class="muted" style="margin-bottom:6px">Forma de pago</div>
+      <div class="seg"><label><input type="radio" name="paymode" value="contado" checked>Pagada ahora</label>
+        <label><input type="radio" name="paymode" value="credito">A crédito</label></div>
+      <div class="grid2"><label class="f"><span>Método de pago</span><select id="paymethod">${methodOptions()}</select></label>
+        <label class="f hidden" id="abono-wrap"><span>Abono inicial (opcional)</span><input id="abono" type="number" step="any" inputmode="decimal" placeholder="0"></label></div>
+      <div class="btns"><button class="btn" id="cancel">Cancelar</button><button class="btn primary" id="save">Registrar compra</button></div>
+    </div>`;
+  let total = 0;
+  const recalc = () => {
+    total = 0;
+    state.lines.forEach((l, i) => {
+      const t = (num(l.qty) || 0) * (num(l.cost) || 0); total += t;
+      const el = $(`.line-item[data-i="${i}"] [data-total]`, view); if (el) el.textContent = money(t);
+    });
+    $("#total", view).textContent = money(total);
+  };
+  const renderLines = () => {
+    $("#lines", view).innerHTML = state.lines.map((l, i) => `<div class="line-item" data-i="${i}">
+      <label class="f"><span>Producto</span><select data-k="productId">${productSelectOptions(products, l.productId)}</select></label>
+      <div class="nums" style="grid-template-columns:1fr 1.4fr">
+        <label class="f"><span>Cantidad</span><input data-k="qty" type="number" step="any" inputmode="decimal" value="${esc(l.qty)}"></label>
+        <label class="f"><span>Costo unitario</span><input data-k="cost" type="number" step="any" inputmode="decimal" value="${esc(l.cost)}"></label></div>
+      <div class="foot"><span class="money" data-total></span><button class="btn small danger" data-remove>Quitar</button></div></div>`).join("");
+    recalc();
+  };
+  const addLine = () => { state.lines.push({ productId: "", qty: "1", cost: "" }); renderLines(); };
+  $("#lines", view).addEventListener("input", (ev) => {
+    const box = ev.target.closest(".line-item"); const k = ev.target.dataset.k; if (!box || !k) return;
+    const line = state.lines[box.dataset.i]; line[k] = ev.target.value;
+    if (k === "productId") { line.cost = byId[line.productId] ? String(byId[line.productId].cost_price || "") : ""; $('[data-k="cost"]', box).value = line.cost; }
+    recalc();
+  });
+  $("#lines", view).addEventListener("click", (ev) => {
+    if (!ev.target.matches("[data-remove]")) return;
+    state.lines.splice(ev.target.closest(".line-item").dataset.i, 1);
+    if (!state.lines.length) addLine(); else renderLines();
+  });
+  $("#add-line", view).onclick = addLine;
+  const payMode = () => $("input[name=paymode]:checked", view).value;
+  view.querySelectorAll("input[name=paymode]").forEach((r) => r.onchange = () => $("#abono-wrap", view).classList.toggle("hidden", payMode() !== "credito"));
+  $("#cancel", view).onclick = () => go("compras");
+  $("#save", view).onclick = async (ev) => {
+    const errors = [];
+    const supplier_id = $("#supplier", view).value;
+    if (!supplier_id) errors.push("Elige el proveedor.");
+    const items = state.lines.filter((l) => l.productId).map((l) => ({ product_id: l.productId, qty: num(l.qty), unit_cost: num(l.cost) }));
+    if (!items.length) errors.push("Añade al menos un producto.");
+    items.forEach((it) => {
+      const n = byId[it.product_id].name;
+      if (!(it.qty > 0)) errors.push(`En "${n}": la cantidad debe ser mayor que cero.`);
+      if (it.unit_cost === null || it.unit_cost < 0) errors.push(`En "${n}": escribe el costo unitario.`);
+    });
+    const payment = { mode: payMode(), method: $("#paymethod", view).value };
+    if (payment.mode === "credito") {
+      payment.amount = num($("#abono", view).value) ?? 0;
+      if (payment.amount < 0 || payment.amount > total + 0.004) errors.push("El abono inicial debe estar entre 0 y el total.");
+    }
+    const box = $("#errors", view);
+    box.innerHTML = errors.length ? `Revisa lo siguiente:<ul>${errors.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>` : "";
+    box.classList.toggle("hidden", !errors.length);
+    if (errors.length) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    ev.target.disabled = true;
+    try {
+      const r = await api("POST", "api/purchases", { supplier_id, supplier_ref: $("#ref", view).value.trim(), notes: $("#notes", view).value.trim(), items, payment });
+      toast(`Compra ${r.number} registrada. El inventario ya se actualizó.`);
+      comprasFilter = "todas"; go("compras");
+    } catch (e) {
+      box.innerHTML = esc(e.message); box.classList.remove("hidden"); window.scrollTo({ top: 0, behavior: "smooth" });
+    } finally { ev.target.disabled = false; }
+  };
+  addLine();
+}
+
+views.compras = async (view) => {
+  const [purchases, products, suppliers] = await Promise.all([api("GET", "api/purchases"), api("GET", "api/products"), api("GET", "api/suppliers")]);
+  const owed = purchases.reduce((a, p) => a + p.balance, 0);
+  view.innerHTML = `<h2>Compras a proveedores</h2>
+    <div class="toolbar"><input type="search" placeholder="Buscar por número o proveedor…"><button class="btn primary" id="add">+ Nueva compra</button></div>
+    ${comprasSupplier ? `<div class="note">Mostrando solo las compras a <b>${esc(comprasSupplier.name)}</b>. <button class="linkbtn" id="all">Ver todas</button></div>` : ""}
+    <div class="chips" id="filters">${PURCHASE_FILTERS.map(([k, l]) => `<button class="chip ${k === comprasFilter ? "active" : ""}" data-f="${k}">${l}</button>`).join("")}</div>
+    ${owed > 0 ? `<p class="muted">Les debes a tus proveedores: <b class="money">${esc(money(owed))}</b></p>` : ""}
+    <div class="card"><ul class="list" id="list"></ul></div>`;
+  $("#add", view).onclick = () => purchaseForm(view, products, suppliers);
+  const all = $("#all", view); if (all) all.onclick = () => { comprasSupplier = null; go("compras"); };
+  let lastQ = "";
+  const render = (q) => {
+    lastQ = q;
+    const rows = purchases.filter((p) => (!comprasSupplier || p.supplier_id === comprasSupplier.id)
+      && (comprasFilter === "todas" || (comprasFilter === "por_pagar" ? PENDING.includes(p.payment_status) : p.payment_status === comprasFilter))
+      && [p.number, p.supplier_name, p.supplier_ref].join(" ").toLowerCase().includes(q));
+    $("#list", view).innerHTML = rows.length ? rows.map((p, i) => `<li class="${p.status === "anulada" ? "voided" : ""}"><div class="main">
+        <div class="title">${esc(p.number)} · ${esc(fmtDate(p.created_at))}</div>
+        <div class="muted">${esc(p.supplier_name)} · <span class="money">${esc(money(p.total))}</span></div>
+        <div style="margin-top:3px">${badge(p.payment_status)}${PENDING.includes(p.payment_status) ? ` <span class="muted" style="font-size:.85rem">le debes <span class="money">${esc(money(p.balance))}</span></span>` : ""}</div></div>
+        <div class="actions"><button class="btn small" data-det="${i}">Detalle</button></div></li>`).join("")
+      : `<li class="empty">${purchases.length ? "Sin resultados." : "Aún no hay compras registradas."}</li>`;
+    $("#list", view).onclick = (ev) => { const i = ev.target.dataset.det; if (i !== undefined) guarded(() => purchaseDetail(rows[i].id)); };
+  };
+  $("#filters", view).onclick = (ev) => {
+    const f = ev.target.dataset.f; if (!f) return;
+    comprasFilter = f;
+    view.querySelectorAll("#filters .chip").forEach((c) => c.classList.toggle("active", c.dataset.f === f));
+    render(lastQ);
+  };
+  searchable(view, render);
+};
+
+// ---------- gastos ----------
+const DEFAULT_EXPENSE_CATEGORIES = ["Arriendo", "Servicios públicos", "Nómina", "Transporte", "Publicidad", "Mantenimiento", "Impuestos", "Papelería", "Otros"];
+let gastosMonth = localDay().slice(0, 7);
+
+views.gastos = async (view) => {
+  const [y, m] = gastosMonth.split("-").map(Number);
+  const start = new Date(y, m - 1, 1) / 1000, end = new Date(y, m, 1) / 1000;
+  const { expenses, categories } = await api("GET", `api/expenses?start=${start}&end=${end}`);
+  const cats = [...new Set([...categories, ...DEFAULT_EXPENSE_CATEGORIES])];
+  const total = expenses.reduce((a, e) => a + e.amount, 0);
+  const byCat = {};
+  expenses.forEach((e) => { byCat[e.category || "Sin categoría"] = (byCat[e.category || "Sin categoría"] || 0) + e.amount; });
+  view.innerHTML = `<h2>Gastos</h2>${categoryDatalist("exp-cats", cats)}
+    <p class="muted">${isAdmin() ? "Lo que el negocio paga: arriendo, servicios, nómina, transporte… Se restan de la ganancia en el Resumen."
+      : "Registra aquí los gastos que pagues con dinero de la caja (transporte, papelería…). Se descuentan en tu cierre de caja."}</p>
+    <div class="toolbar"><input type="month" id="month" value="${esc(gastosMonth)}" style="max-width:200px"><button class="btn primary" id="add">+ Nuevo gasto</button></div>
+    <div class="tiles"><div class="tile"><div class="k">Total del mes</div><div class="v">${esc(money(total))}</div><div class="s">${expenses.length} gasto(s)</div></div></div>
+    ${Object.keys(byCat).length > 1 ? `<div class="card"><h3>Por categoría</h3><table class="t"><tbody>${Object.entries(byCat).sort((a, b) => b[1] - a[1])
+      .map(([c, a]) => `<tr><td>${esc(c)}</td><td class="r money">${esc(money(a))}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    <div class="card"><ul class="list" id="list">${expenses.length ? expenses.map((e, i) => `<li><div class="main">
+      <div class="title">${esc(e.category || "Sin categoría")} · <span class="money">${esc(money(e.amount))}</span></div>
+      <div class="muted">${esc(fmtDate(e.spent_at))} · ${esc(METHOD_LABEL[e.method] || e.method)}${e.description ? " · " + esc(e.description) : ""}
+        ${e.supplier_name ? " · " + esc(e.supplier_name) : ""}${e.user_name ? " · " + esc(e.user_name) : ""}</div></div>
+      ${isAdmin() ? `<div class="actions"><button class="btn small danger" data-del="${i}">Eliminar</button></div>` : ""}</li>`).join("")
+      : `<li class="empty">Sin gastos en este mes.</li>`}</ul></div>`;
+  $("#month", view).onchange = (ev) => { if (ev.target.value) { gastosMonth = ev.target.value; go("gastos"); } };
+  $("#add", view).onclick = async () => {
+    const suppliers = isAdmin() ? await api("GET", "api/suppliers") : [];
+    const data = await openForm("Nuevo gasto", [
+      { name: "day", label: "Fecha", type: "date", required: true, default: localDay() },
+      { name: "category", label: "Categoría", required: true, list: "exp-cats", placeholder: "ej. Arriendo" },
+      { name: "description", label: "Descripción (opcional)", placeholder: "ej. Arriendo de octubre" },
+      { name: "amount", label: "Monto", type: "number", required: true, validate: (v) => v > 0 ? null : "El monto debe ser mayor que cero." },
+      { name: "method", label: "¿Cómo se pagó?", type: "select", options: PAYMENT_METHODS.map(([value, label]) => ({ value, label })),
+        help: "Si se pagó en efectivo de la caja, se descuenta en el cierre de caja." },
+      ...(suppliers.length ? [{ name: "supplier_id", label: "Proveedor (opcional)", type: "select",
+        options: [{ value: "", label: "— ninguno —" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))] }] : []),
+    ], {}, "Guardar gasto");
+    if (!data) return;
+    const [yy, mm, dd] = data.day.split("-").map(Number);
+    const isToday = data.day === localDay();
+    data.spent_at = isToday ? Date.now() / 1000 : new Date(yy, mm - 1, dd, 12) / 1000;
+    delete data.day;
+    guarded(async () => { await api("POST", "api/expenses", data); toast("Gasto registrado."); go("gastos"); });
+  };
+  $("#list", view).onclick = (ev) => {
+    const i = ev.target.dataset.del;
+    if (i !== undefined && confirm("¿Eliminar este gasto?")) guarded(async () => { await api("DELETE", `api/expenses/${expenses[i].id}`); toast("Gasto eliminado."); go("gastos"); });
+  };
+};
+
+// ---------- cierre de caja ----------
+let cajaDay = localDay(), cajaUser = "all";
+
+views.caja = async (view) => {
+  const admin = isAdmin();
+  const tz = new Date().getTimezoneOffset();
+  const [c, users, closings] = await Promise.all([
+    api("GET", `api/cash?day=${cajaDay}&tz=${tz}&user_id=${encodeURIComponent(cajaUser)}`),
+    admin ? api("GET", "api/users") : [], api("GET", "api/cash/closings")]);
+  const rows = [["received", "Cobros de facturas", 1], ["refunded", "Dinero devuelto a clientes", -1],
+    ["supplier_payments", "Pagos a proveedores", -1], ["expenses", "Gastos", -1]];
+  const cell = (obj, m, sign) => { const v = obj[m] || 0; return v ? `${sign < 0 ? "−" : ""}${esc(money(v))}` : "—"; };
+  const closed = c.closing;
+  // En el celular no caben 4 columnas: solo se muestran los métodos que tuvieron movimiento (efectivo siempre).
+  const used = PAYMENT_METHODS.filter(([m]) => m === "efectivo" || rows.some(([k]) => c[k][m]));
+  view.innerHTML = `<h2>Cierre de caja</h2>
+    <p class="muted">Compara lo que el sistema dice que debería haber con lo que realmente hay al final del día.</p>
+    <div class="toolbar"><input type="date" id="day" value="${esc(cajaDay)}" style="max-width:190px">
+      ${admin ? `<select id="who" style="max-width:240px"><option value="all">Todos</option>${users.filter((u) => u.active).map((u) =>
+        `<option value="${esc(u.id)}" ${u.id === cajaUser ? "selected" : ""}>${esc(u.name)}</option>`).join("")}</select>` : `<span class="muted">Caja de ${esc(c.scope_name)}</span>`}</div>
+    <div class="card"><h3>Movimientos del día · ${esc(c.scope_name)}</h3>
+      <div style="overflow-x:auto"><table class="t"><thead><tr><th></th>${used.map(([, l]) => `<th class="r">${l}</th>`).join("")}</tr></thead><tbody>
+        ${rows.filter(([k]) => used.some(([m]) => c[k][m])).map(([k, label, sign]) => `<tr><td>${label}</td>${used.map(([m]) => `<td class="r money">${cell(c[k], m, sign)}</td>`).join("")}</tr>`).join("")}
+        <tr><td><b>Neto del día</b></td>${used.map(([m]) => `<td class="r money"><b>${esc(money(c.expected[m]))}</b></td>`).join("")}</tr>
+      </tbody></table></div></div>
+    ${closed ? `<div class="card"><h3>Caja cerrada ${closed.difference === 0 ? "✅" : "⚠️"}</h3>
+      <p class="muted" style="margin-top:-6px">Por ${esc(closed.user_name)} el ${esc(fmtDateTime(closed.created_at))} · base ${esc(money(closed.opening_cash))}</p>
+      <table class="t"><thead><tr><th></th><th class="r">Esperado</th><th class="r">Contado</th><th class="r">Diferencia</th></tr></thead><tbody>
+        ${PAYMENT_METHODS.map(([m, l]) => { const dif = (closed.counted[m] || 0) - (closed.expected[m] || 0);
+          return `<tr><td>${l}</td><td class="r money">${esc(money(closed.expected[m]))}</td><td class="r money">${esc(money(closed.counted[m]))}</td>
+            <td class="r money ${dif < 0 ? "neg" : dif > 0 ? "pos" : ""}">${esc(money(dif))}</td></tr>`; }).join("")}</tbody></table>
+      <div class="totals"><div class="grand"><span>${closed.difference === 0 ? "Cuadró" : closed.difference > 0 ? "Sobró" : "Faltó"}</span>
+        <span class="money">${esc(money(Math.abs(closed.difference)))}</span></div></div>
+      ${closed.notes ? `<p class="muted">Notas: ${esc(closed.notes)}</p>` : ""}
+      ${admin ? `<button class="btn small danger" id="reopen">Borrar este cierre (para repetirlo)</button>` : ""}</div>`
+    : `<form class="card" id="close-form"><h3>Contar y cerrar</h3>
+      <label class="f"><span>Base de caja (efectivo con el que se abrió el día)</span><input name="opening_cash" type="number" step="any" inputmode="decimal" value="0"></label>
+      <table class="t"><thead><tr><th></th><th class="r">Esperado</th><th class="r" style="width:42%">Contado</th></tr></thead><tbody>
+        ${PAYMENT_METHODS.map(([m, l]) => `<tr><td>${l}</td><td class="r money" data-exp="${m}"></td>
+          <td class="r"><input name="c_${m}" type="number" step="any" inputmode="decimal" placeholder="0" style="text-align:right"></td></tr>`).join("")}</tbody></table>
+      <div class="totals"><div class="grand"><span id="dif-label">Diferencia</span><span class="money" id="dif"></span></div></div>
+      <label class="f"><span>Notas (opcional)</span><input name="notes" placeholder="ej. se pagó un domicilio con la caja"></label>
+      <div id="err" class="errors hidden"></div>
+      <button class="btn primary block" type="submit">Guardar cierre de caja</button></form>`}
+    <div class="card"><h3>Últimos cierres</h3>${closings.length ? `<table class="t"><thead><tr><th>Día</th><th>Caja</th><th class="r">Resultado</th></tr></thead><tbody>
+      ${closings.map((x) => `<tr><td>${esc(x.day)}</td><td>${esc(x.scope_name)}<div class="muted" style="font-size:.8rem">por ${esc(x.user_name)}</div></td>
+        <td class="r money ${x.difference < 0 ? "neg" : x.difference > 0 ? "pos" : ""}">${x.difference === 0 ? "Cuadró" : (x.difference > 0 ? "Sobró " : "Faltó ") + esc(money(Math.abs(x.difference)))}</td></tr>`).join("")}</tbody></table>`
+      : `<p class="muted">Todavía no hay cierres.</p>`}</div>`;
+  $("#day", view).onchange = (ev) => { if (ev.target.value) { cajaDay = ev.target.value; go("caja"); } };
+  const who = $("#who", view); if (who) who.onchange = (ev) => { cajaUser = ev.target.value; go("caja"); };
+  const reopen = $("#reopen", view);
+  if (reopen) reopen.onclick = () => confirm("¿Borrar este cierre? Quedará registrado en Actividad.") &&
+    guarded(async () => { await api("DELETE", `api/cash/closings/${closed.id}`); toast("Cierre borrado."); go("caja"); });
+  const form = $("#close-form", view);
+  if (!form) return;
+  const expectedOf = () => {
+    const base = num(form.opening_cash.value) || 0;
+    return Object.fromEntries(PAYMENT_METHODS.map(([m]) => [m, (c.expected[m] || 0) + (m === "efectivo" ? base : 0)]));
+  };
+  const recalc = () => {
+    const exp = expectedOf();
+    let dif = 0;
+    PAYMENT_METHODS.forEach(([m]) => { $(`[data-exp="${m}"]`, form).textContent = money(exp[m]); dif += (num(form[`c_${m}`].value) || 0) - exp[m]; });
+    dif = Math.round(dif * 100) / 100;
+    $("#dif-label", form).textContent = Math.abs(dif) < 0.005 ? "Cuadra" : dif > 0 ? "Sobra" : "Falta";
+    $("#dif", form).textContent = money(Math.abs(dif));
+  };
+  form.oninput = recalc; recalc();
+  form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const counted = Object.fromEntries(PAYMENT_METHODS.map(([m]) => [m, num(form[`c_${m}`].value) || 0]));
+    const box = $("#err", view);
+    if (Object.values(counted).some((v) => v < 0) || (num(form.opening_cash.value) || 0) < 0) {
+      box.textContent = "Los valores no pueden ser negativos."; box.classList.remove("hidden"); return;
+    }
+    const btn = ev.submitter; btn.disabled = true;
+    try {
+      const r = await api("POST", "api/cash/closings", { day: cajaDay, tz, user_id: cajaUser, opening_cash: num(form.opening_cash.value) || 0,
+        counted, notes: form.notes.value.trim() });
+      toast(Math.abs(r.difference) < 0.005 ? "Caja cerrada: cuadró." : `Caja cerrada: ${r.difference > 0 ? "sobraron" : "faltaron"} ${money(Math.abs(r.difference))}.`, r.difference < 0);
+      go("caja");
+    } catch (e) { box.textContent = e.message; box.classList.remove("hidden"); }
+    finally { btn.disabled = false; }
+  };
 };
 
 // ---------- empresa + copias de seguridad (administrador) ----------
@@ -687,6 +1122,8 @@ views.empresa = async (view) => {
         <label class="f"><span>Moneda (símbolo)</span><input name="currency" value="${esc(c.currency || "$")}"></label>
         <label class="f"><span>Nombre del impuesto</span><input name="tax_label" value="${esc(c.tax_label || "IVA")}"></label>
         <label class="f"><span>Tarifa por defecto (%)</span><input name="tax_rate" type="number" step="any" inputmode="decimal" value="${esc(c.tax_rate ?? 19)}"></label>
+        <label class="f"><span>Indicativo de país para WhatsApp</span><input name="phone_country" inputmode="numeric" value="${esc(c.phone_country || "57")}">
+          <span class="muted" style="font-size:.8rem">57 = Colombia. Se agrega a los celulares de los clientes que no lo tengan.</span></label>
       </div>
       <label class="f"><span>Nota al pie de la factura</span><textarea name="footer_note" rows="2">${esc(c.footer_note)}</textarea></label>
       <div id="err" class="errors hidden"></div>
@@ -735,7 +1172,7 @@ views.empresa = async (view) => {
   });
   $("#backup", view).onclick = (ev) => guarded(async () => {
     ev.target.disabled = true;
-    try { await downloadBlob("api/backup", `facturador-copia-${new Date().toISOString().slice(0, 10)}.db`, "application/octet-stream"); }
+    try { await downloadBlob("api/backup", `facturador-copia-${localDay()}.db`, "application/octet-stream"); }
     finally { ev.target.disabled = false; }
   });
   view.querySelectorAll("[data-b]").forEach((b) => b.onclick = () => guarded(() =>
@@ -745,9 +1182,9 @@ views.empresa = async (view) => {
 // ---------- usuarios (administrador) ----------
 views.usuarios = async (view) => {
   const users = await api("GET", "api/users");
-  const roleOpts = [{ value: "vendedor", label: "Vendedor — factura, cobra y ve el historial" }, { value: "admin", label: "Administrador — todo, incluido resumen, anular y usuarios" }];
+  const roleOpts = [{ value: "vendedor", label: "Vendedor — factura, cobra, cierra su caja y ve el historial" }, { value: "admin", label: "Administrador — todo, incluido resumen, compras, anular y usuarios" }];
   view.innerHTML = `<h2>Usuarios</h2>
-    <p class="muted">Cada empleado entra con su propio usuario. Cada factura y cada pago quedan registrados con quién los hizo.</p>
+    <p class="muted">Cada empleado entra con su propio usuario. Todo lo que hace queda registrado en Actividad.</p>
     ${auth.mode === "key" ? `<div class="note">Entraste con la clave maestra. Crea tu propio usuario administrador y úsalo en el día a día; no compartas la clave maestra.</div>` : ""}
     <div class="toolbar"><button class="btn primary" id="add">+ Nuevo usuario</button></div>
     <div class="card"><ul class="list" id="list">${users.length ? users.map((u, i) => `<li class="${u.active ? "" : "voided"}"><div class="main">
@@ -784,11 +1221,45 @@ views.usuarios = async (view) => {
   };
 };
 
+// ---------- actividad (administrador) ----------
+const ENTITY_LABEL = { "": "Todo", factura: "Facturas", compra: "Compras", producto: "Productos", cliente: "Clientes", proveedor: "Proveedores",
+  gasto: "Gastos", caja: "Caja", usuario: "Usuarios", empresa: "Empresa" };
+let actividadEntity = "";
+
+views.actividad = async (view) => {
+  view.innerHTML = `<h2>Actividad</h2>
+    <p class="muted">Quién hizo qué y cuándo. No se puede borrar ni editar.</p>
+    <div class="toolbar"><input type="search" placeholder="Buscar (ej. precio, Martillo, FAC-0012, Juan)…"></div>
+    <div class="chips" id="ents">${Object.entries(ENTITY_LABEL).map(([k, l]) => `<button class="chip ${k === actividadEntity ? "active" : ""}" data-e="${k}">${l}</button>`).join("")}</div>
+    <div class="card"><ul class="list" id="list"><li class="empty">Cargando…</li></ul>
+      <button class="btn small hidden" id="more" style="margin-top:10px">Cargar más</button></div>`;
+  let items = [], q = "", timer;
+  const load = async (append) => {
+    const before = append && items.length ? `&before=${items[items.length - 1].created_at}` : "";
+    const rows = await api("GET", `api/activity?limit=100${before}&q=${encodeURIComponent(q)}&entity=${encodeURIComponent(actividadEntity)}`);
+    items = append ? items.concat(rows) : rows;
+    $("#list", view).innerHTML = items.length ? items.map((a) => `<li><div class="main">
+      <div>${esc(a.summary)}</div><div class="muted" style="font-size:.85rem">${esc(fmtDateTime(a.created_at))} · ${esc(a.user_name || "—")}</div></div></li>`).join("")
+      : `<li class="empty">Sin movimientos.</li>`;
+    $("#more", view).classList.toggle("hidden", rows.length < 100);
+  };
+  $("input[type=search]", view).oninput = (ev) => { clearTimeout(timer); timer = setTimeout(() => { q = ev.target.value.trim(); guarded(() => load(false)); }, 300); };
+  $("#ents", view).onclick = (ev) => {
+    if (ev.target.dataset.e === undefined) return;
+    actividadEntity = ev.target.dataset.e;
+    view.querySelectorAll("#ents .chip").forEach((c) => c.classList.toggle("active", c.dataset.e === actividadEntity));
+    guarded(() => load(false));
+  };
+  $("#more", view).onclick = () => guarded(() => load(true));
+  await load(false);
+};
+
 // ---------- historial ----------
 let historialFilter = "todas";
-const FILTERS = [["todas", "Todas"], ["por_cobrar", "Por cobrar"], ["pagada", "Pagadas"], ["anulada", "Anuladas"]];
+const FILTERS = [["todas", "Todas"], ["por_cobrar", "Por cobrar"], ["pagada", "Pagadas"], ["devolucion", "Con devolución"], ["anulada", "Anuladas"]];
 const matchesFilter = (inv) => historialFilter === "todas" ? true
-  : historialFilter === "por_cobrar" ? ["pendiente", "abono"].includes(inv.payment_status)
+  : historialFilter === "por_cobrar" ? PENDING.includes(inv.payment_status)
+  : historialFilter === "devolucion" ? inv.returned > 0
   : inv.payment_status === historialFilter;
 
 async function registerPayment(inv) {
@@ -804,27 +1275,81 @@ async function registerPayment(inv) {
 
 async function voidInvoice(inv) {
   const data = await openForm(`Anular ${inv.number}`, [
-    { name: "reason", label: "Motivo de la anulación", required: true, placeholder: "ej. error en el cliente, devolución…" },
+    { name: "reason", label: "Motivo de la anulación", required: true, placeholder: "ej. error en el cliente…" },
   ], {}, "Anular factura", `<div class="note">La factura queda en el historial marcada como ANULADA (no se borra, para no
-    dejar huecos en la numeración) y el stock de sus artículos vuelve al inventario. No se puede deshacer.</div>`);
+    dejar huecos en la numeración) y el stock de sus artículos vuelve al inventario. Si solo devuelven algunos artículos, usa <b>Devolución</b>. No se puede deshacer.</div>`);
   if (!data) return false;
   return !!(await guarded(async () => { await api("POST", `api/invoices/${inv.id}/void`, data); toast(`Factura ${inv.number} anulada.`); return true; }));
+}
+
+function returnDialog(inv) {
+  const avail = inv.items.filter((it) => it.qty - it.returned_qty > 1e-9);
+  return new Promise((resolve) => {
+    showDialog(`<h2>Devolución · ${esc(inv.number)}</h2>
+      <p class="muted" style="margin-top:-8px">Indica cuántas unidades devuelve el cliente. Vuelven al inventario y se descuentan de la factura.</p>
+      <table class="t"><thead><tr><th>Artículo</th><th class="r">Puede devolver</th><th class="r" style="width:30%">Devuelve</th></tr></thead><tbody>
+        ${avail.map((it) => `<tr><td>${esc(it.description)}</td><td class="r">${fmtNum(it.qty - it.returned_qty)}</td>
+          <td class="r"><input type="number" step="any" min="0" inputmode="decimal" data-item="${it.id}" data-max="${it.qty - it.returned_qty}"
+            data-unit="${it.price * (1 - (it.discount || 0) / 100) * (1 + (inv.tax_rate || 0) / 100)}" placeholder="0" style="text-align:right"></td></tr>`).join("")}</tbody></table>
+      <div class="totals"><div class="grand"><span>Valor devuelto</span><span class="money" id="ret-total">${esc(money(0))}</span></div></div>
+      <p class="muted" id="refund-note"></p>
+      <label class="f"><span>Motivo *</span><input name="reason" placeholder="ej. producto defectuoso"></label>
+      <label class="f" id="refund-wrap"><span>Si hay que devolverle dinero, ¿cómo?</span><select name="refund_method">${methodOptions()}</select></label>
+      <div id="ret-err" class="errors hidden"></div>
+      <div class="btns"><button class="btn" value="cancel" formnovalidate>Cancelar</button><button class="btn primary" value="ok">Registrar devolución</button></div>`,
+    (form, dlg) => {
+      const inputs = [...form.querySelectorAll("input[data-item]")];
+      const recalc = () => {
+        const amt = Math.round(inputs.reduce((a, i) => a + (num(i.value) || 0) * Number(i.dataset.unit), 0) * 100) / 100;
+        $("#ret-total", form).textContent = money(amt);
+        const refund = inv.payment_tracking ? Math.min(amt, Math.max(0, inv.paid - Math.max(inv.total - amt, 0))) : 0;
+        $("#refund-note", form).textContent = refund > 0 ? `El cliente ya pagó: hay que devolverle ${money(refund)}.`
+          : amt > 0 ? "No hay que devolver dinero: se descuenta de lo que el cliente debe." : "";
+        $("#refund-wrap", form).classList.toggle("hidden", !(refund > 0));
+      };
+      form.oninput = recalc; recalc();
+      form.onsubmit = async (ev) => {
+        if (ev.submitter?.value !== "ok") return;
+        ev.preventDefault();
+        const items = inputs.map((i) => ({ item_id: Number(i.dataset.item), qty: num(i.value) || 0 })).filter((x) => x.qty > 0);
+        const box = $("#ret-err", form);
+        const bad = inputs.find((i) => (num(i.value) || 0) > Number(i.dataset.max) + 1e-9 || (num(i.value) || 0) < 0);
+        const err = !items.length ? "Indica al menos una cantidad." : bad ? "Una de las cantidades supera lo que se puede devolver."
+          : !form.reason.value.trim() ? "Escribe el motivo." : "";
+        if (err) { box.textContent = err; box.classList.remove("hidden"); return; }
+        try {
+          await api("POST", `api/invoices/${inv.id}/returns`, { items, reason: form.reason.value.trim(), refund_method: form.refund_method.value });
+          toast("Devolución registrada. El inventario ya se actualizó.");
+          dlg.returnData = true; dlg.close();
+        } catch (e) { box.textContent = e.message; box.classList.remove("hidden"); }
+      };
+      dlg.onclose = () => resolve(!!dlg.returnData);
+    });
+  });
 }
 
 async function invoiceDetail(id) {
   const inv = await api("GET", `api/invoices/${id}`);
   const pays = inv.payments || [];
+  const canReturn = isAdmin() && inv.status !== "anulada" && inv.items.some((it) => it.qty - it.returned_qty > 1e-9);
   showDialog(`<h2>${esc(inv.number)} ${badge(inv.payment_status)}</h2>
-    <p class="muted" style="margin-top:-8px">${esc(fmtDateTime(inv.created_at))} · ${esc(inv.client_name)}
+    <p class="muted" style="margin-top:-8px">${esc(fmtDateTime(inv.created_at))} · ${esc(inv.client_name)}${inv.client_phone ? " · " + esc(inv.client_phone) : ""}
       ${inv.user_name ? `<br>Hecha por ${esc(inv.user_name)}` : ""}${inv.seller ? ` · Vendedor: ${esc(inv.seller)}` : ""}</p>
     ${inv.status === "anulada" ? `<div class="errors">Anulada el ${esc(fmtDateTime(inv.voided_at))}${inv.voided_by ? ` por ${esc(inv.voided_by)}` : ""}: ${esc(inv.void_reason)}</div>` : ""}
     <table class="t"><thead><tr><th>Artículo</th><th class="r">Cant.</th><th class="r">Total</th></tr></thead><tbody>
-      ${inv.items.map((it) => `<tr><td>${esc(it.description)}${it.discount ? ` <span class="muted">(-${fmtNum(it.discount)}%)</span>` : ""}</td>
+      ${inv.items.map((it) => `<tr><td>${esc(it.description)}${it.discount ? ` <span class="muted">(-${fmtNum(it.discount)}%)</span>` : ""}
+        ${it.returned_qty ? `<div class="muted" style="font-size:.8rem">devueltos: ${fmtNum(it.returned_qty)}</div>` : ""}</td>
         <td class="r">${fmtNum(it.qty)}</td><td class="r money">${esc(money(it.qty * it.price * (1 - (it.discount || 0) / 100)))}</td></tr>`).join("")}
     </tbody></table>
-    <div class="totals"><div><span>Total</span><span class="money">${esc(money(inv.total))}</span></div>
+    <div class="totals">${inv.returned ? `<div><span>Facturado</span><span class="money">${esc(money(inv.original_total))}</span></div>
+      <div><span>Devoluciones</span><span class="money">− ${esc(money(inv.returned))}</span></div>` : ""}
+      <div><span>Total</span><span class="money">${esc(money(inv.total))}</span></div>
       <div><span>Pagado</span><span class="money">${esc(money(inv.paid))}</span></div>
       ${inv.payment_tracking ? `<div class="grand"><span>Saldo</span><span class="money">${esc(money(inv.balance))}</span></div>` : ""}</div>
+    ${inv.returns.length ? `<h3>Devoluciones</h3><table class="t"><tbody>${inv.returns.map((r) => `<tr><td>${esc(fmtDateTime(r.created_at))}
+      <div class="muted" style="font-size:.8rem">${esc(r.items.map((x) => `${fmtNum(x.qty)} × ${x.description}`).join(", "))} · ${esc(r.reason)}
+      ${r.refund ? ` · devueltos ${esc(money(r.refund))} en ${esc(METHOD_LABEL[r.refund_method] || r.refund_method)}` : ""}${r.user_name ? ` · ${esc(r.user_name)}` : ""}</div></td>
+      <td class="r money">${esc(money(r.amount))}</td></tr>`).join("")}</tbody></table>` : ""}
     <h3>Pagos</h3>
     ${pays.length ? `<table class="t"><tbody>${pays.map((p) => `<tr><td>${esc(fmtDateTime(p.created_at))}<div class="muted" style="font-size:.8rem">
       ${esc(METHOD_LABEL[p.method] || p.method)}${p.user_name ? ` · ${esc(p.user_name)}` : ""}${p.note ? ` · ${esc(p.note)}` : ""}</div></td>
@@ -833,13 +1358,17 @@ async function invoiceDetail(id) {
       : `<p class="muted">${inv.payment_tracking ? "Sin pagos todavía." : "Esta factura es de antes del registro de pagos."}</p>`}
     <div class="btns" style="margin-top:14px">
       <button type="button" class="btn" data-act="pdf">PDF</button>
-      ${inv.status !== "anulada" && inv.payment_status !== "pagada" ? `<button type="button" class="btn good" data-act="pay">Registrar pago</button>` : ""}
+      <button type="button" class="btn good" data-act="wa">WhatsApp</button>
+      ${inv.status !== "anulada" && PENDING.concat("sin_registro").includes(inv.payment_status) ? `<button type="button" class="btn good" data-act="pay">Registrar pago</button>` : ""}
+      ${canReturn ? `<button type="button" class="btn" data-act="return">Devolución</button>` : ""}
       ${isAdmin() && inv.status !== "anulada" ? `<button type="button" class="btn danger" data-act="void">Anular</button>` : ""}
       <button class="btn primary" value="close">Cerrar</button></div>`, (form, dlg) => {
     form.onclick = async (ev) => {
       const act = ev.target.dataset.act, delpay = ev.target.dataset.delpay;
       if (act === "pdf") { ev.target.disabled = true; await guarded(() => downloadPdf(inv)); ev.target.disabled = false; }
+      if (act === "wa") guarded(() => shareInvoiceWhatsApp(inv));
       if (act === "pay") { await closeModal(dlg); if (await registerPayment(inv)) go("historial"); }
+      if (act === "return") { await closeModal(dlg); if (await returnDialog(inv)) go("historial"); }
       if (act === "void") { await closeModal(dlg); if (await voidInvoice(inv)) go("historial"); }
       if (delpay && confirm("¿Quitar este pago? Úsalo solo si se registró por error.")) {
         await guarded(async () => { await api("DELETE", `api/payments/${delpay}`); toast("Pago quitado."); dlg.close(); go("historial"); });
@@ -850,7 +1379,7 @@ async function invoiceDetail(id) {
 
 views.historial = async (view) => {
   const invoices = await api("GET", "api/invoices");
-  const pendingTotal = invoices.filter((i) => ["pendiente", "abono"].includes(i.payment_status)).reduce((a, i) => a + i.balance, 0);
+  const pendingTotal = invoices.filter((i) => PENDING.includes(i.payment_status)).reduce((a, i) => a + i.balance, 0);
   view.innerHTML = `<h2>Historial de facturas</h2>
     <div class="toolbar"><input type="search" placeholder="Buscar por número, cliente o vendedor…"></div>
     <div class="chips" id="filters">${FILTERS.map(([k, l]) => `<button class="chip ${k === historialFilter ? "active" : ""}" data-f="${k}">${l}</button>`).join("")}</div>
@@ -864,10 +1393,10 @@ views.historial = async (view) => {
     $("#list", view).innerHTML = rows.length ? rows.map((inv, i) => `<li class="${inv.status === "anulada" ? "voided" : ""}"><div class="main">
         <div class="title">${esc(inv.number)} · ${esc(fmtDate(inv.created_at))}</div>
         <div class="muted">${esc(inv.client_name || "Sin cliente")} · <span class="money">${esc(money(inv.total))}</span></div>
-        <div style="margin-top:3px">${badge(inv.payment_status)}${["pendiente", "abono"].includes(inv.payment_status)
+        <div style="margin-top:3px">${badge(inv.payment_status)}${inv.returned > 0 && inv.payment_status !== "devuelta" ? ` <span class="badge">con devolución</span>` : ""}${PENDING.includes(inv.payment_status)
           ? ` <span class="muted" style="font-size:.85rem">saldo <span class="money">${esc(money(inv.balance))}</span></span>` : ""}</div></div>
-        <div class="actions"><button class="btn small" data-pdf="${i}">PDF</button>
-        ${["pendiente", "abono"].includes(inv.payment_status) ? `<button class="btn small good" data-pay="${i}">Cobrar</button>` : ""}
+        <div class="actions"><button class="btn small" data-pdf="${i}">PDF</button><button class="btn small good" data-wa="${i}">WhatsApp</button>
+        ${PENDING.includes(inv.payment_status) ? `<button class="btn small good" data-pay="${i}">Cobrar</button>` : ""}
         <button class="btn small" data-det="${i}">Detalle</button></div></li>`).join("")
       : `<li class="empty">${invoices.length ? "Sin resultados." : "Aún no hay facturas."}</li>`;
     $("#list", view).onclick = async (ev) => {
@@ -877,6 +1406,7 @@ views.historial = async (view) => {
         await guarded(() => downloadPdf(rows[e.pdf]));
         ev.target.disabled = false;
       }
+      if (e.wa) guarded(() => shareInvoiceWhatsApp(rows[e.wa]));
       if (e.pay && await registerPayment(rows[e.pay])) go("historial");
       if (e.det) guarded(() => invoiceDetail(rows[e.det].id));
     };
@@ -890,13 +1420,31 @@ views.historial = async (view) => {
   searchable(view, render);
 };
 
+// Ventana que aparece al crear una factura: descargar, enviar por WhatsApp o seguir.
+function invoiceCreatedDialog(inv) {
+  showDialog(`<h2>Factura ${esc(inv.number)} creada ✅</h2>
+    <p class="muted" style="margin-top:-8px">${esc(inv.client_name)} · <b class="money">${esc(money(inv.total))}</b></p>
+    <div class="btns" style="justify-content:stretch;flex-direction:column">
+      <button type="button" class="btn good block" data-act="wa">Enviar por WhatsApp</button>
+      <button type="button" class="btn block" data-act="pdf">Descargar / compartir PDF</button>
+      <button type="button" class="btn block" data-act="new">Hacer otra factura</button>
+      <button class="btn primary block" value="close">Ver historial</button></div>`, (form, dlg) => {
+    form.onclick = async (ev) => {
+      const act = ev.target.dataset.act;
+      if (act === "wa") guarded(() => shareInvoiceWhatsApp(inv));
+      if (act === "pdf") { ev.target.disabled = true; await guarded(() => downloadPdf(inv)); ev.target.disabled = false; }
+      if (act === "new") { dlg.next = "factura"; dlg.close(); }
+    };
+    dlg.onclose = () => go(dlg.next || "historial");
+  });
+}
+
 // ---------- nueva factura ----------
 views.factura = async (view) => {
   const [clients, products] = await Promise.all([api("GET", "api/clients"), api("GET", "api/products"), loadCompany()]);
   const state = { clientId: "", lines: [] };
   const productById = Object.fromEntries(products.map((p) => [p.id, p]));
   const taxLabel = company.tax_label || "Impuesto";
-  const methodOptions = PAYMENT_METHODS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
 
   view.innerHTML = `<h2>Nueva factura</h2>
     <p class="muted">Los artículos se eligen desde tu catálogo, para llevar el inventario al día.</p>
@@ -928,10 +1476,10 @@ views.factura = async (view) => {
       <div class="seg"><label><input type="radio" name="paymode" value="contado" checked>Pagada ahora</label>
         <label><input type="radio" name="paymode" value="credito">A crédito</label></div>
       <div class="grid2">
-        <label class="f"><span>Método de pago</span><select id="paymethod">${methodOptions}</select></label>
+        <label class="f"><span>Método de pago</span><select id="paymethod">${methodOptions()}</select></label>
         <label class="f hidden" id="abono-wrap"><span>Abono inicial (opcional)</span><input id="abono" type="number" step="any" inputmode="decimal" placeholder="0"></label>
       </div>
-      <button class="btn primary block" id="generate">Generar factura y descargar PDF</button>
+      <button class="btn primary block" id="generate">Generar factura</button>
     </div>`;
 
   let currentTotal = 0;
@@ -944,8 +1492,9 @@ views.factura = async (view) => {
     $("#client", view).innerHTML = `<option value="">— elegir cliente —</option>` + clients.map((c) =>
       `<option value="${esc(c.id)}" ${c.id === state.clientId ? "selected" : ""}>${esc(c.name)}${c.doc ? " — " + esc(c.doc) : ""}</option>`).join("");
     const c = clients.find((x) => x.id === state.clientId);
-    $("#client-info", view).textContent = c
-      ? [c.doc, c.address, [c.phone, c.email].filter(Boolean).join(" · ")].filter(Boolean).join("\n") : "";
+    $("#client-info", view).innerHTML = c
+      ? esc([c.doc, c.address, [c.phone, c.email].filter(Boolean).join(" · ")].filter(Boolean).join("\n"))
+        + (c.balance > 0 ? `\n<span class="badge pendiente">Ya debe ${esc(money(c.balance))}</span>` : "") : "";
   };
   $("#client", view).onchange = (ev) => { state.clientId = ev.target.value; renderClients(); };
   $("#new-client", view).onclick = async () => {
@@ -953,12 +1502,9 @@ views.factura = async (view) => {
     if (c) { clients.push(c); clients.sort((a, b) => a.name.localeCompare(b.name)); state.clientId = c.id; renderClients(); }
   };
 
-  const productOptions = (sel) => `<option value="">— elegir producto —</option>` + products.map((p) =>
-    `<option value="${esc(p.id)}" ${p.id === sel ? "selected" : ""} ${(p.stock_qty || 0) <= 0 && p.id !== sel ? "disabled" : ""}>${esc(p.name)} (stock: ${fmtNum(p.stock_qty)})</option>`).join("");
-
   const renderLines = () => {
     $("#lines", view).innerHTML = state.lines.map((l, i) => `<div class="line-item" data-i="${i}">
-        <label class="f"><span>Producto</span><select data-k="productId">${productOptions(l.productId)}</select></label>
+        <label class="f"><span>Producto</span><select data-k="productId">${productSelectOptions(products, l.productId, { disableEmpty: true })}</select></label>
         <div class="nums">
           <label class="f"><span>Cant.</span><input data-k="qty" type="number" step="any" inputmode="decimal" value="${esc(l.qty)}"></label>
           <label class="f"><span>Precio</span><input data-k="price" type="number" step="any" inputmode="decimal" value="${esc(l.price)}"></label>
@@ -1044,16 +1590,14 @@ views.factura = async (view) => {
 
     ev.target.disabled = true;
     try {
+      const { balance, ...snapshot } = client;
       const r = await api("POST", "api/invoices", {
-        client_snapshot: client, items, tax_rate: taxRate, payment,
+        client_snapshot: snapshot, items, tax_rate: taxRate, payment,
         notes: $("#notes", view).value.trim(), warranty: $("#warranty", view).value.trim(),
         seller: $("#seller", view).value.trim(),
       });
-      toast(`Factura ${r.number} guardada.`);
-      try { await downloadPdf(r); }
-      catch (e) { toast(`La factura ${r.number} se guardó, pero el PDF falló: ${e.message}. Descárgalo desde Historial.`, true); }
       historialFilter = "todas";
-      go("historial");
+      invoiceCreatedDialog({ ...r, client_name: client.name, client_phone: client.phone });
     } catch (e) {
       box.innerHTML = esc(e.message); box.classList.remove("hidden");
       window.scrollTo({ top: 0, behavior: "smooth" });

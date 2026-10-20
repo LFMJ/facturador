@@ -10,17 +10,9 @@ una cuenta gratuita. Anota tu nombre de usuario: tu servidor quedará en
 `https://tuusuario.pythonanywhere.com`.
 
 ## 2. Subir el código del servidor
-En el panel de PythonAnywhere, abre la pestaña **"Files"** y sube el
-contenido de la carpeta `server/` (arrástralos o usa "Upload a file") a una
-carpeta nueva, por ejemplo `/home/tuusuario/facturador_server/`. Debes
-subir:
-- `app.py` y `requirements.txt` (de la carpeta `server/`)
-- la carpeta **`static/`** completa (de `server/static/`: `index.html`,
-  `manifest.webmanifest`, `icon.svg`) — es la versión web para celular
-- **`pdf_gen.py`** (está en la raíz del proyecto, no en `server/`) — el
-  servidor lo usa para generar los PDF de la versión web
-
-Debe quedar así:
+En el panel de PythonAnywhere, abre la pestaña **"Files"** y sube **todo el
+contenido de la carpeta `server/`** a una carpeta nueva, por ejemplo
+`/home/tuusuario/facturador_server/`. Debe quedar así:
 ```
 /home/tuusuario/facturador_server/
   app.py
@@ -32,15 +24,12 @@ Debe quedar así:
     icon.svg
 ```
 
-## 3. Poner tu clave maestra
-Abre `app.py` (puedes editarlo directo en el navegador de PythonAnywhere) y
-cambia esta línea por una clave secreta tuya:
-```python
-API_KEY = os.environ.get("FACTURADOR_API_KEY", "cambia-esta-clave")
-```
-Reemplaza `"cambia-esta-clave"` por algo largo y difícil de adivinar. Esta es
-la **clave maestra**: da acceso total y es **solo para ti** (el dueño). No se
-la des a los empleados: cada uno tendrá su propio usuario (paso 8).
+## 3. Elegir tu clave maestra
+Inventa una clave larga y difícil de adivinar (por ejemplo, 30 letras y
+números al azar). Esta es la **clave maestra**: da acceso total y es **solo
+para ti** (el dueño). No se la des a los empleados: cada uno tendrá su propio
+usuario (paso 8). Se escribe en el archivo WSGI (paso 5), **no** en `app.py`,
+para que nunca termine en GitHub.
 
 ## 4. Instalar dependencias
 En el panel, abre una **"Bash console"** (pestaña "Consoles") y ejecuta:
@@ -64,10 +53,16 @@ y un archivo de configuración WSGI. Abre el **"WSGI configuration file"**
 que apunte a tu `app.py`, algo así:
 
 ```python
+import os
 import sys
+
+# Clave maestra (paso 3). Para cambiarla, edita esta línea y dale "Reload".
+os.environ["FACTURADOR_API_KEY"] = "pon-aqui-tu-clave-maestra"
+
 path = '/home/tuusuario/facturador_server'
-if path not in sys.path:
-    sys.path.append(path)
+if path in sys.path:
+    sys.path.remove(path)
+sys.path.insert(0, path)  # de primera, para que no cargue otro app.py
 
 from app import app as application
 ```
@@ -93,11 +88,13 @@ Debería mostrar algo como `{"error":"Sesión vencida o datos de acceso incorrec
 4. Toca **Salir** y entra con tu usuario nuevo.
 
 Roles:
-- **Vendedor:** hace facturas, registra pagos, ve el historial, consulta
-  productos y crea/edita clientes.
+- **Vendedor:** hace facturas, cobra, las envía por WhatsApp, ve el historial y
+  los estados de cuenta, maneja clientes, consulta productos, registra gastos de
+  caja chica y cierra **su propia** caja.
 - **Administrador:** todo lo anterior, más Resumen de ventas (con ganancias),
-  anular facturas, productos, proveedores, datos de la empresa, copias de
-  seguridad y usuarios.
+  devoluciones, anular facturas, compras, productos, proveedores, gastos de
+  todos, la caja de todos, datos de la empresa, copias de seguridad, usuarios y
+  el registro de Actividad.
 
 Si alguien deja la empresa o pierde el celular: en **Usuarios → Editar**,
 desmarca "Usuario activo" (o cámbiale la contraseña). Su sesión se cierra en
@@ -112,16 +109,14 @@ usuario y contraseña. El navegador recuerda la sesión hasta que toque **"Salir
 ⋮ → "Agregar a la pantalla principal"; en iPhone/Safari, botón Compartir →
 "Agregar a inicio". Queda un ícono como si fuera una app.
 
-## 10. Configurar la app de escritorio
-En cada equipo, al abrir la app escribe la **URL del servidor**
-(`https://tuusuario.pythonanywhere.com`), tu **usuario** y tu **contraseña**.
-La app recuerda la sesión en ese equipo hasta que toques "Cerrar sesión".
+En el computador también se puede "instalar": en Chrome o Edge, ícono de
+**Instalar** en la barra de direcciones (o menú ⋮ → "Instalar Facturador").
 
-## 11. Copias de seguridad
+## 10. Copias de seguridad
 - **Automáticas:** el servidor guarda una copia por día en la carpeta
   `backups/` (junto a `app.py`) y conserva las últimas 14.
 - **Manuales (recomendado una vez por semana):** en **Mi empresa → Copias de
-  seguridad → "Descargar copia ahora"** (web o escritorio). Guarda ese archivo
+  seguridad → "Descargar copia ahora"**. Guarda ese archivo
   `.db` en tu computador o en Google Drive: las copias automáticas viven en el
   mismo servidor, así que no sirven si pierdes la cuenta de PythonAnywhere.
 
@@ -134,21 +129,19 @@ La app recuerda la sesión en ese equipo hasta que toques "Cerrar sesión".
 4. En **"Web"**, toca **"Enable"** y luego **"Reload"**.
 
 ## Si ya tenías el servidor funcionando (actualizar)
-Sube los archivos nuevos (`app.py`, `pdf_gen.py` y la carpeta `static/`)
+Sube los archivos de `server/` (`app.py`, `pdf_gen.py` y la carpeta `static/`)
 reemplazando los viejos y dale **"Reload"**. **No se borra nada**: la base de
-datos se actualiza sola la primera vez (agrega las columnas y tablas nuevas).
-Después sigue el paso 8 para crear los usuarios.
+datos se actualiza sola la primera vez que arranca (agrega las columnas y
+tablas nuevas). Antes de actualizar, descarga una copia de seguridad.
 
-- Las facturas que ya existían quedan como **"Sin registro de pago"** (no se
-  marcan como pagadas ni como pendientes porque no se sabe). Si quieres, desde
-  Historial → Detalle puedes registrarles el pago.
-- La clave que usaban todos pasa a ser la **clave maestra**. Cuando cada
-  empleado tenga su usuario, **cámbiala** (paso 3) para que nadie más la use.
-- Las apps de escritorio viejas siguen funcionando con esa clave hasta que la
-  cambies; actualízalas a la nueva versión para que pidan usuario y contraseña.
-- Las facturas ya no se eliminan: se **anulan** (quedan en el historial con un
-  sello de ANULADA y el stock vuelve al inventario), para no dejar huecos en
-  la numeración.
+- Si en la carpeta de inicio (`/home/tuusuario/`) quedó un `app.py` viejo, el
+  archivo WSGI debe poner la carpeta del servidor **de primera** en `sys.path`
+  (con `sys.path.insert(0, path)`, como en el paso 5); si no, Python carga el
+  viejo.
+- Las facturas de antes del registro de pagos quedan como **"Sin registro de
+  pago"**; desde Historial → Detalle se les puede registrar el pago.
+- Las facturas viejas se enlazan solas con su cliente (mismo nombre y
+  documento) para que aparezcan en su estado de cuenta.
 
 ## Límites del plan gratuito a tener en cuenta
 - Espacio en disco limitado (~512 MB) — más que suficiente para años de

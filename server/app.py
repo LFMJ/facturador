@@ -1,8 +1,11 @@
 """
-API del Facturador. Expone por HTTP las operaciones de empresa, clientes,
-proveedores, productos (con inventario), facturas (con descuento por línea,
-vendedor, garantía, estado de pago y anulación), usuarios, resumen de ventas
-y copias de seguridad. También sirve la versión web (static/index.html).
+API del Facturador y versión web (static/index.html).
+
+Módulos: empresa, clientes (con estado de cuenta), proveedores (con saldo por
+pagar), productos (inventario y categorías), facturas (descuento por línea,
+estado de pago, anulación, devoluciones parciales y enlace público del PDF),
+compras a proveedores, gastos, cierre de caja, usuarios, registro de
+actividad, resumen de ventas y copias de seguridad.
 
 Acceso:
 - Cada empleado entra con su usuario y contraseña (POST /api/login) y recibe
@@ -18,6 +21,7 @@ import datetime
 import hashlib
 import hmac
 import io
+import json
 import os
 import secrets
 import sqlite3
@@ -33,13 +37,10 @@ from flask import Flask, g, request, jsonify, send_file, send_from_directory
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
-# pdf_gen.py puede estar junto a este archivo (en PythonAnywhere) o en la
-# carpeta de arriba (al correrlo desde el repositorio).
 SERVER_DIR = Path(__file__).parent
-for _p in (SERVER_DIR, SERVER_DIR.parent):
-    if (_p / "pdf_gen.py").exists() and str(_p) not in sys.path:
-        sys.path.append(str(_p))
-from pdf_gen import generate_invoice_pdf  # noqa: E402
+if str(SERVER_DIR) not in sys.path:
+    sys.path.insert(0, str(SERVER_DIR))
+from pdf_gen import generate_invoice_pdf, generate_statement_pdf  # noqa: E402
 
 # -------- configuración --------
 API_KEY = os.environ.get("FACTURADOR_API_KEY", "cambia-esta-clave")
@@ -64,7 +65,8 @@ CREATE TABLE IF NOT EXISTS company (
     phone TEXT DEFAULT '', email TEXT DEFAULT '', website TEXT DEFAULT '',
     currency TEXT DEFAULT '$', tax_label TEXT DEFAULT 'IVA', tax_rate REAL DEFAULT 19,
     footer_note TEXT DEFAULT 'Gracias por su compra.',
-    logo_blob BLOB, logo_mime TEXT, invoice_counter INTEGER DEFAULT 1
+    logo_blob BLOB, logo_mime TEXT, invoice_counter INTEGER DEFAULT 1,
+    purchase_counter INTEGER DEFAULT 1, phone_country TEXT DEFAULT '57'
 );
 CREATE TABLE IF NOT EXISTS clients (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, doc TEXT DEFAULT '', address TEXT DEFAULT '',
@@ -77,14 +79,15 @@ CREATE TABLE IF NOT EXISTS suppliers (
 CREATE TABLE IF NOT EXISTS products (
     id TEXT PRIMARY KEY, name TEXT NOT NULL, price REAL NOT NULL,
     unit TEXT DEFAULT 'unidad', supplier_id TEXT, stock_qty REAL DEFAULT 0,
-    cost_price REAL DEFAULT 0, created_at REAL
+    cost_price REAL DEFAULT 0, created_at REAL, category TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS invoices (
     id TEXT PRIMARY KEY, number TEXT UNIQUE NOT NULL, created_at REAL,
     client_name TEXT, client_doc TEXT, client_address TEXT, client_phone TEXT, client_email TEXT,
     tax_rate REAL DEFAULT 0, notes TEXT DEFAULT '', warranty TEXT DEFAULT '', seller TEXT DEFAULT '',
     status TEXT DEFAULT 'activa', voided_at REAL, voided_by TEXT DEFAULT '', void_reason TEXT DEFAULT '',
-    user_id TEXT, user_name TEXT DEFAULT '', payment_tracking INTEGER DEFAULT 0
+    user_id TEXT, user_name TEXT DEFAULT '', payment_tracking INTEGER DEFAULT 0,
+    client_id TEXT, public_token TEXT
 );
 CREATE TABLE IF NOT EXISTS invoice_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,6 +113,43 @@ CREATE TABLE IF NOT EXISTS payments (
     amount REAL NOT NULL, method TEXT NOT NULL, note TEXT DEFAULT '', created_at REAL,
     user_id TEXT, user_name TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS returns (
+    id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    amount REAL NOT NULL, net REAL NOT NULL, cost REAL DEFAULT 0, refund REAL DEFAULT 0,
+    refund_method TEXT, reason TEXT DEFAULT '', created_at REAL, user_id TEXT, user_name TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS return_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, return_id TEXT NOT NULL REFERENCES returns(id) ON DELETE CASCADE,
+    invoice_item_id INTEGER NOT NULL, product_id TEXT, description TEXT, qty REAL NOT NULL, amount REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS purchases (
+    id TEXT PRIMARY KEY, number TEXT UNIQUE NOT NULL, supplier_id TEXT, supplier_name TEXT DEFAULT '',
+    supplier_ref TEXT DEFAULT '', notes TEXT DEFAULT '', created_at REAL, user_id TEXT, user_name TEXT DEFAULT '',
+    status TEXT DEFAULT 'activa', voided_at REAL, voided_by TEXT DEFAULT '', void_reason TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS purchase_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, purchase_id TEXT NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+    product_id TEXT, description TEXT NOT NULL, qty REAL NOT NULL, unit_cost REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS supplier_payments (
+    id TEXT PRIMARY KEY, purchase_id TEXT NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+    amount REAL NOT NULL, method TEXT NOT NULL, note TEXT DEFAULT '', created_at REAL,
+    user_id TEXT, user_name TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS expenses (
+    id TEXT PRIMARY KEY, spent_at REAL NOT NULL, category TEXT DEFAULT '', description TEXT DEFAULT '',
+    amount REAL NOT NULL, method TEXT NOT NULL, supplier_id TEXT, created_at REAL,
+    user_id TEXT, user_name TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS cash_closings (
+    id TEXT PRIMARY KEY, day TEXT NOT NULL, scope_user_id TEXT, scope_name TEXT DEFAULT '',
+    opening_cash REAL DEFAULT 0, expected TEXT NOT NULL, counted TEXT NOT NULL, difference REAL DEFAULT 0,
+    notes TEXT DEFAULT '', created_at REAL, user_id TEXT, user_name TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS activity_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at REAL NOT NULL, user_id TEXT, user_name TEXT DEFAULT '',
+    entity TEXT DEFAULT '', entity_id TEXT, summary TEXT NOT NULL
+);
 """
 
 # columnas que se agregaron después del primer lanzamiento: se aplican con
@@ -118,6 +158,9 @@ MIGRATIONS = [
     ("products", "supplier_id", "ALTER TABLE products ADD COLUMN supplier_id TEXT"),
     ("products", "stock_qty", "ALTER TABLE products ADD COLUMN stock_qty REAL DEFAULT 0"),
     ("products", "cost_price", "ALTER TABLE products ADD COLUMN cost_price REAL DEFAULT 0"),
+    ("products", "category", "ALTER TABLE products ADD COLUMN category TEXT DEFAULT ''"),
+    ("company", "purchase_counter", "ALTER TABLE company ADD COLUMN purchase_counter INTEGER DEFAULT 1"),
+    ("company", "phone_country", "ALTER TABLE company ADD COLUMN phone_country TEXT DEFAULT '57'"),
     ("invoices", "warranty", "ALTER TABLE invoices ADD COLUMN warranty TEXT DEFAULT ''"),
     ("invoices", "seller", "ALTER TABLE invoices ADD COLUMN seller TEXT DEFAULT ''"),
     ("invoices", "status", "ALTER TABLE invoices ADD COLUMN status TEXT DEFAULT 'activa'"),
@@ -126,9 +169,11 @@ MIGRATIONS = [
     ("invoices", "void_reason", "ALTER TABLE invoices ADD COLUMN void_reason TEXT DEFAULT ''"),
     ("invoices", "user_id", "ALTER TABLE invoices ADD COLUMN user_id TEXT"),
     ("invoices", "user_name", "ALTER TABLE invoices ADD COLUMN user_name TEXT DEFAULT ''"),
-    # Las facturas anteriores a esta versión quedan con 0 ("sin registro de pago"),
+    # Las facturas anteriores al registro de pagos quedan con 0 ("sin registro de pago"),
     # para no marcarlas como pendientes ni como pagadas sin saberlo.
     ("invoices", "payment_tracking", "ALTER TABLE invoices ADD COLUMN payment_tracking INTEGER DEFAULT 0"),
+    ("invoices", "client_id", "ALTER TABLE invoices ADD COLUMN client_id TEXT"),
+    ("invoices", "public_token", "ALTER TABLE invoices ADD COLUMN public_token TEXT"),
     ("invoice_items", "product_id", "ALTER TABLE invoice_items ADD COLUMN product_id TEXT"),
     ("invoice_items", "discount", "ALTER TABLE invoice_items ADD COLUMN discount REAL DEFAULT 0"),
     ("invoice_items", "unit_cost", "ALTER TABLE invoice_items ADD COLUMN unit_cost REAL"),
@@ -137,8 +182,18 @@ MIGRATIONS = [
 INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_items_invoice ON invoice_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_payments_invoice ON payments(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_payments_created ON payments(created_at);
 CREATE INDEX IF NOT EXISTS idx_invoices_created ON invoices(created_at);
+CREATE INDEX IF NOT EXISTS idx_invoices_client ON invoices(client_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_token ON invoices(public_token);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_returns_invoice ON returns(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_purchases_supplier ON purchases(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_items ON purchase_items(purchase_id);
+CREATE INDEX IF NOT EXISTS idx_supplier_payments ON supplier_payments(purchase_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_spent ON expenses(spent_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_closings_scope ON cash_closings(day, COALESCE(scope_user_id, ''));
+CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_log(created_at);
 """
 
 
@@ -151,6 +206,13 @@ def init_db():
         if col not in cols:
             conn.execute(ddl)
     conn.executescript(INDEXES)
+    # Las facturas viejas guardaban solo el nombre del cliente: se enlazan con su
+    # ficha (mismo nombre y documento) para que aparezcan en su estado de cuenta.
+    conn.execute(
+        """UPDATE invoices SET client_id = (
+             SELECT c.id FROM clients c WHERE c.name = invoices.client_name
+               AND COALESCE(c.doc, '') = COALESCE(invoices.client_doc, '') LIMIT 1)
+           WHERE client_id IS NULL""")
     conn.commit()
     conn.close()
 
@@ -198,6 +260,10 @@ def money(x):
     return round((x or 0) + 1e-9, 2)
 
 
+def fmt(x):
+    return f"{money(x):,.2f}"
+
+
 def num(value, field, minimum=None, maximum=None, default=None):
     """Convierte a número validando rango; lanza ApiError con mensaje claro."""
     if value is None or value == "":
@@ -222,6 +288,40 @@ def body():
     if not isinstance(d, dict):
         raise ApiError("La petición no trae datos válidos.")
     return d
+
+
+def text(d, key, default=""):
+    v = d.get(key, default)
+    return default if v is None else str(v).strip()
+
+
+def parse_method(method):
+    method = (method or "efectivo").strip().lower()
+    if method not in PAYMENT_METHODS:
+        raise ApiError("Método de pago no válido. Usa: " + ", ".join(PAYMENT_METHODS) + ".")
+    return method
+
+
+def tz_offset_arg():
+    return num(request.args.get("tz"), "tz", -14 * 60, 14 * 60, default=0)  # minutos, como JS getTimezoneOffset()
+
+
+def day_bounds(day, tz_offset):
+    """Inicio y fin (epoch) de un día local 'YYYY-MM-DD' dado el desfase del navegador."""
+    try:
+        d = datetime.date.fromisoformat(day)
+    except (TypeError, ValueError):
+        raise ApiError("La fecha no es válida (usa AAAA-MM-DD).")
+    start = datetime.datetime(d.year, d.month, d.day, tzinfo=datetime.timezone.utc).timestamp() + tz_offset * 60
+    return start, start + 86400
+
+
+# ---------- registro de actividad ----------
+def log(conn, entity, entity_id, summary):
+    user = getattr(g, "user", None) or {}
+    conn.execute(
+        "INSERT INTO activity_log (created_at, user_id, user_name, entity, entity_id, summary) VALUES (?,?,?,?,?,?)",
+        (time.time(), user.get("id"), user.get("name", ""), entity, entity_id, summary))
 
 
 # ---------- autenticación ----------
@@ -270,6 +370,10 @@ def require_auth(admin=False):
     return deco
 
 
+def is_admin():
+    return g.user["role"] == "admin"
+
+
 def public_user(row):
     return {k: row[k] for k in ("id", "username", "name", "role")} | {"active": bool(row["active"])}
 
@@ -277,7 +381,7 @@ def public_user(row):
 @app.post("/api/login")
 def login():
     d = body()
-    username = str(d.get("username", "")).strip()
+    username = text(d, "username")
     password = str(d.get("password", ""))
     if not username or not password:
         raise ApiError("Escribe tu usuario y tu contraseña.")
@@ -287,6 +391,7 @@ def login():
         if not u:
             check_password_hash(_DUMMY_HASH, password)  # mismo tiempo de respuesta
             raise ApiError("Usuario o contraseña incorrectos.", 401)
+        g.user = {"id": u["id"], "name": u["name"]}
         if (u["locked_until"] or 0) > now:
             mins = int((u["locked_until"] - now) // 60) + 1
             raise ApiError(f"Demasiados intentos fallidos. Intenta de nuevo en {mins} minuto(s).", 429)
@@ -294,6 +399,7 @@ def login():
             fails = (u["failed_logins"] or 0) + 1
             if fails >= MAX_FAILED_LOGINS:
                 conn.execute("UPDATE users SET failed_logins=0, locked_until=? WHERE id=?", (now + LOCK_SECONDS, u["id"]))
+                log(conn, "usuario", u["id"], f"Usuario bloqueado 5 minutos por {MAX_FAILED_LOGINS} intentos fallidos")
             else:
                 conn.execute("UPDATE users SET failed_logins=? WHERE id=?", (fails, u["id"]))
             conn.commit()
@@ -305,6 +411,7 @@ def login():
         conn.execute("DELETE FROM sessions WHERE last_seen < ?", (now - SESSION_DAYS * 86400,))
         conn.execute("INSERT INTO sessions (token_hash, user_id, created_at, last_seen) VALUES (?,?,?,?)",
                      (_token_hash(token), u["id"], now, now))
+        log(conn, "usuario", u["id"], "Entró al sistema")
         return jsonify({"token": token, "user": public_user(u)})
 
 
@@ -321,7 +428,7 @@ def logout():
 @app.get("/api/me")
 @require_auth()
 def me():
-    return jsonify({k: v for k, v in g.user.items()})
+    return jsonify(dict(g.user))
 
 
 @app.post("/api/me/password")
@@ -341,6 +448,7 @@ def change_own_password():
         auth = request.headers.get("Authorization", "")
         conn.execute("DELETE FROM sessions WHERE user_id=? AND token_hash<>?",
                      (g.user["id"], _token_hash(auth[7:].strip())))
+        log(conn, "usuario", g.user["id"], "Cambió su contraseña")
     return jsonify({"ok": True})
 
 
@@ -362,9 +470,7 @@ def list_users():
 @require_auth(admin=True)
 def create_user():
     d = body()
-    username = str(d.get("username", "")).strip()
-    name = str(d.get("name", "")).strip()
-    role = d.get("role", "vendedor")
+    username, name, role = text(d, "username"), text(d, "name"), d.get("role", "vendedor")
     password = str(d.get("password", ""))
     if not username or not name:
         raise ApiError("El usuario necesita nombre y nombre de usuario.")
@@ -379,6 +485,7 @@ def create_user():
             conn.execute(
                 "INSERT INTO users (id, username, name, password_hash, role, active, created_at) VALUES (?,?,?,?,?,1,?)",
                 (uid, username, name, generate_password_hash(password), role, time.time()))
+            log(conn, "usuario", uid, f'Creó el usuario "{username}" ({name}) como {role}')
     except sqlite3.IntegrityError:
         raise ApiError(f'Ya existe un usuario "{username}".')
     return jsonify({"id": uid})
@@ -392,7 +499,7 @@ def update_user(uid):
         u = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
         if not u:
             raise ApiError("Usuario no encontrado.", 404)
-        name = str(d.get("name", u["name"])).strip() or u["name"]
+        name = text(d, "name", u["name"]) or u["name"]
         role = d.get("role", u["role"])
         active = 1 if d.get("active", bool(u["active"])) else 0
         if role not in ROLES:
@@ -400,12 +507,22 @@ def update_user(uid):
         if uid == g.user["id"] and (not active or role != "admin"):
             raise ApiError("No puedes quitarte a ti mismo el rol de administrador ni desactivarte.")
         conn.execute("UPDATE users SET name=?, role=?, active=? WHERE id=?", (name, role, active, uid))
+        changes = []
+        if name != u["name"]:
+            changes.append(f'nombre "{u["name"]}" → "{name}"')
+        if role != u["role"]:
+            changes.append(f"rol {u['role']} → {role}")
+        if active != u["active"]:
+            changes.append("activado" if active else "desactivado")
         if d.get("password"):
             _check_password_rules(str(d["password"]))
             conn.execute("UPDATE users SET password_hash=?, failed_logins=0, locked_until=0 WHERE id=?",
                          (generate_password_hash(str(d["password"])), uid))
+            changes.append("contraseña cambiada")
         if not active or d.get("password"):
             conn.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
+        if changes:
+            log(conn, "usuario", uid, f'Editó el usuario "{u["username"]}": ' + ", ".join(changes))
     return jsonify({"ok": True})
 
 
@@ -433,12 +550,15 @@ def ping():
 
 
 # ---------- empresa ----------
+def _company(conn):
+    return dict(conn.execute("SELECT * FROM company WHERE id=1").fetchone())
+
+
 @app.get("/api/company")
 @require_auth()
 def get_company():
     with get_conn() as conn:
-        row = conn.execute("SELECT * FROM company WHERE id=1").fetchone()
-        data = dict(row) if row else {}
+        data = _company(conn)
     logo_blob = data.pop("logo_blob", None)
     data["logo_base64"] = base64.b64encode(logo_blob).decode("ascii") if logo_blob else None
     return jsonify(data)
@@ -449,14 +569,15 @@ def get_company():
 def save_company():
     d = body()
     tax_rate = num(d.get("tax_rate"), "La tarifa de impuesto", 0, 100, default=0)
+    country = "".join(ch for ch in text(d, "phone_country", "57") if ch.isdigit()) or "57"
     with get_conn() as conn:
         conn.execute(
             """UPDATE company SET name=?, tax_id=?, address=?, phone=?, email=?, website=?,
-               currency=?, tax_label=?, tax_rate=?, footer_note=? WHERE id=1""",
-            (d.get("name", ""), d.get("tax_id", ""), d.get("address", ""), d.get("phone", ""),
-             d.get("email", ""), d.get("website", ""), d.get("currency", "$"),
-             d.get("tax_label", "IVA"), tax_rate, d.get("footer_note", "")),
-        )
+               currency=?, tax_label=?, tax_rate=?, footer_note=?, phone_country=? WHERE id=1""",
+            (text(d, "name"), text(d, "tax_id"), text(d, "address"), text(d, "phone"), text(d, "email"),
+             text(d, "website"), text(d, "currency", "$") or "$", text(d, "tax_label", "IVA") or "IVA",
+             tax_rate, text(d, "footer_note"), country))
+        log(conn, "empresa", "1", "Editó los datos de la empresa")
     return jsonify({"ok": True})
 
 
@@ -469,6 +590,7 @@ def save_logo():
         raise ApiError("El logo pesa demasiado (máximo 3 MB).")
     with get_conn() as conn:
         conn.execute("UPDATE company SET logo_blob=?, logo_mime=? WHERE id=1", (blob, d.get("mime")))
+        log(conn, "empresa", "1", "Cambió el logo" if blob else "Quitó el logo")
     return jsonify({"ok": True})
 
 
@@ -477,36 +599,49 @@ def save_logo():
 @require_auth()
 def list_clients():
     with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM clients ORDER BY name COLLATE NOCASE").fetchall()
-        return jsonify([dict(r) for r in rows])
+        rows = [dict(r) for r in conn.execute("SELECT * FROM clients ORDER BY name COLLATE NOCASE").fetchall()]
+        owed = {}
+        for inv in _invoice_rows(conn, "WHERE i.client_id IS NOT NULL"):
+            if inv["payment_status"] in ("pendiente", "abono"):
+                owed[inv["client_id"]] = owed.get(inv["client_id"], 0) + inv["balance"]
+    for r in rows:
+        r["balance"] = money(owed.get(r["id"], 0))
+    return jsonify(rows)
+
+
+def _client_values(d):
+    name = text(d, "name")
+    if not name:
+        raise ApiError("El nombre del cliente es obligatorio.")
+    return (name, text(d, "doc"), text(d, "address"), text(d, "phone"), text(d, "email"))
 
 
 @app.post("/api/clients")
 @require_auth()
 def create_client():
-    d = body()
-    if not str(d.get("name", "")).strip():
-        raise ApiError("El nombre del cliente es obligatorio.")
+    vals = _client_values(body())
     cid = str(uuid.uuid4())
     with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO clients (id, name, doc, address, phone, email, created_at) VALUES (?,?,?,?,?,?,?)",
-            (cid, d["name"], d.get("doc", ""), d.get("address", ""), d.get("phone", ""), d.get("email", ""), time.time()),
-        )
+        conn.execute("INSERT INTO clients (name, doc, address, phone, email, id, created_at) VALUES (?,?,?,?,?,?,?)",
+                     vals + (cid, time.time()))
+        log(conn, "cliente", cid, f'Creó el cliente "{vals[0]}"')
     return jsonify({"id": cid})
 
 
 @app.put("/api/clients/<cid>")
 @require_auth()
 def update_client(cid):
-    d = body()
-    if not str(d.get("name", "")).strip():
-        raise ApiError("El nombre del cliente es obligatorio.")
+    vals = _client_values(body())
     with get_conn() as conn:
-        conn.execute(
-            "UPDATE clients SET name=?, doc=?, address=?, phone=?, email=? WHERE id=?",
-            (d.get("name", ""), d.get("doc", ""), d.get("address", ""), d.get("phone", ""), d.get("email", ""), cid),
-        )
+        old = conn.execute("SELECT * FROM clients WHERE id=?", (cid,)).fetchone()
+        if not old:
+            raise ApiError("Cliente no encontrado.", 404)
+        conn.execute("UPDATE clients SET name=?, doc=?, address=?, phone=?, email=? WHERE id=?", vals + (cid,))
+        changes = [f'{label}: "{old[k] or ""}" → "{v}"' for k, label, v in
+                   zip(("name", "doc", "address", "phone", "email"),
+                       ("nombre", "documento", "dirección", "teléfono", "correo"), vals) if (old[k] or "") != v]
+        if changes:
+            log(conn, "cliente", cid, f'Editó el cliente "{vals[0]}": ' + "; ".join(changes))
     return jsonify({"id": cid})
 
 
@@ -514,8 +649,55 @@ def update_client(cid):
 @require_auth(admin=True)
 def delete_client(cid):
     with get_conn() as conn:
+        old = conn.execute("SELECT name FROM clients WHERE id=?", (cid,)).fetchone()
         conn.execute("DELETE FROM clients WHERE id=?", (cid,))
+        if old:
+            log(conn, "cliente", cid, f'Eliminó el cliente "{old["name"]}"')
     return jsonify({"ok": True})
+
+
+def _statement(conn, cid):
+    client = conn.execute("SELECT * FROM clients WHERE id=?", (cid,)).fetchone()
+    if not client:
+        raise ApiError("Cliente no encontrado.", 404)
+    invoices = _invoice_rows(conn, "WHERE i.client_id=?", (cid,), order="ORDER BY i.created_at")
+    active = [i for i in invoices if i["status"] != "anulada"]
+    tracked = [i for i in active if i["payment_tracking"]]
+    pending = [i for i in active if i["payment_status"] in ("pendiente", "abono")]
+    for inv in pending:
+        _ensure_token(conn, inv)
+    return {
+        "client": dict(client),
+        "invoices": invoices,
+        "summary": {
+            "count": len(active),
+            "total": money(sum(i["total"] for i in active)),
+            "paid": money(sum(i["paid"] for i in tracked)),
+            "balance": money(sum(i["balance"] for i in pending)),
+            "pending": [{"id": i["id"], "number": i["number"], "created_at": i["created_at"],
+                         "balance": i["balance"], "public_token": i["public_token"]} for i in pending],
+        },
+    }
+
+
+@app.get("/api/clients/<cid>/statement")
+@require_auth()
+def client_statement(cid):
+    with get_conn() as conn:
+        return jsonify(_statement(conn, cid))
+
+
+@app.get("/api/clients/<cid>/statement.pdf")
+@require_auth()
+def client_statement_pdf(cid):
+    with get_conn() as conn:
+        st = _statement(conn, cid)
+        company = _company(conn)
+    buf = io.BytesIO()
+    generate_statement_pdf(st, company, buf)
+    buf.seek(0)
+    safe = "".join(ch for ch in st["client"]["name"] if ch.isalnum() or ch in " -_")[:40].strip() or "cliente"
+    return send_file(buf, mimetype="application/pdf", download_name=f"Estado de cuenta - {safe}.pdf")
 
 
 # ---------- proveedores ----------
@@ -523,34 +705,41 @@ def delete_client(cid):
 @require_auth()
 def list_suppliers():
     with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM suppliers ORDER BY name COLLATE NOCASE").fetchall()
-        return jsonify([dict(r) for r in rows])
+        rows = [dict(r) for r in conn.execute("SELECT * FROM suppliers ORDER BY name COLLATE NOCASE").fetchall()]
+        owed = {}
+        for p in _purchase_rows(conn, "WHERE p.status <> 'anulada'"):
+            owed[p["supplier_id"]] = owed.get(p["supplier_id"], 0) + p["balance"]
+    for r in rows:
+        r["balance"] = money(owed.get(r["id"], 0))
+    return jsonify(rows)
+
+
+def _supplier_values(d):
+    name = text(d, "name")
+    if not name:
+        raise ApiError("El nombre del proveedor es obligatorio.")
+    return (name, text(d, "contact_name"), text(d, "phone"), text(d, "email"))
 
 
 @app.post("/api/suppliers")
 @require_auth(admin=True)
 def create_supplier():
-    d = body()
-    if not str(d.get("name", "")).strip():
-        raise ApiError("El nombre del proveedor es obligatorio.")
+    vals = _supplier_values(body())
     sid = str(uuid.uuid4())
     with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO suppliers (id, name, contact_name, phone, email, created_at) VALUES (?,?,?,?,?,?)",
-            (sid, d["name"], d.get("contact_name", ""), d.get("phone", ""), d.get("email", ""), time.time()),
-        )
+        conn.execute("INSERT INTO suppliers (name, contact_name, phone, email, id, created_at) VALUES (?,?,?,?,?,?)",
+                     vals + (sid, time.time()))
+        log(conn, "proveedor", sid, f'Creó el proveedor "{vals[0]}"')
     return jsonify({"id": sid})
 
 
 @app.put("/api/suppliers/<sid>")
 @require_auth(admin=True)
 def update_supplier(sid):
-    d = body()
+    vals = _supplier_values(body())
     with get_conn() as conn:
-        conn.execute(
-            "UPDATE suppliers SET name=?, contact_name=?, phone=?, email=? WHERE id=?",
-            (d.get("name", ""), d.get("contact_name", ""), d.get("phone", ""), d.get("email", ""), sid),
-        )
+        conn.execute("UPDATE suppliers SET name=?, contact_name=?, phone=?, email=? WHERE id=?", vals + (sid,))
+        log(conn, "proveedor", sid, f'Editó el proveedor "{vals[0]}"')
     return jsonify({"id": sid})
 
 
@@ -558,7 +747,10 @@ def update_supplier(sid):
 @require_auth(admin=True)
 def delete_supplier(sid):
     with get_conn() as conn:
+        old = conn.execute("SELECT name FROM suppliers WHERE id=?", (sid,)).fetchone()
         conn.execute("DELETE FROM suppliers WHERE id=?", (sid,))
+        if old:
+            log(conn, "proveedor", sid, f'Eliminó el proveedor "{old["name"]}"')
     return jsonify({"ok": True})
 
 
@@ -573,22 +765,25 @@ def list_products():
                ORDER BY p.name COLLATE NOCASE"""
         ).fetchall()
     result = [dict(r) for r in rows]
-    if g.user["role"] != "admin":
+    if not is_admin():
         for r in result:
             r.pop("cost_price", None)  # el costo (y la ganancia) solo lo ve el administrador
     return jsonify(result)
 
 
+PRODUCT_FIELDS = ("name", "price", "unit", "supplier_id", "stock_qty", "cost_price", "category")
+
+
 def _product_values(d):
-    name = str(d.get("name", "")).strip()
+    name = text(d, "name")
     if not name:
         raise ApiError("El producto necesita un nombre.")
     price = num(d.get("price"), "El precio", 0)
     if price <= 0:
         raise ApiError("El precio debe ser mayor que cero.")
-    return (name, price, d.get("unit") or "unidad", d.get("supplier_id") or None,
+    return (name, price, text(d, "unit") or "unidad", d.get("supplier_id") or None,
             num(d.get("stock_qty"), "Las existencias", 0, default=0),
-            num(d.get("cost_price"), "El costo", 0, default=0))
+            num(d.get("cost_price"), "El costo", 0, default=0), text(d, "category"))
 
 
 @app.post("/api/products")
@@ -598,8 +793,9 @@ def create_product():
     pid = str(uuid.uuid4())
     with get_conn() as conn:
         conn.execute(
-            """INSERT INTO products (name, price, unit, supplier_id, stock_qty, cost_price, id, created_at)
-               VALUES (?,?,?,?,?,?,?,?)""", vals + (pid, time.time()))
+            """INSERT INTO products (name, price, unit, supplier_id, stock_qty, cost_price, category, id, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""", vals + (pid, time.time()))
+        log(conn, "producto", pid, f'Creó el producto "{vals[0]}" (precio {fmt(vals[1])}, stock {vals[4]:g})')
     return jsonify({"id": pid})
 
 
@@ -608,9 +804,30 @@ def create_product():
 def update_product(pid):
     vals = _product_values(body())
     with get_conn() as conn:
+        old = conn.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()
+        if not old:
+            raise ApiError("Producto no encontrado.", 404)
         conn.execute(
-            "UPDATE products SET name=?, price=?, unit=?, supplier_id=?, stock_qty=?, cost_price=? WHERE id=?",
+            "UPDATE products SET name=?, price=?, unit=?, supplier_id=?, stock_qty=?, cost_price=?, category=? WHERE id=?",
             vals + (pid,))
+        labels = {"name": "nombre", "price": "precio", "unit": "unidad", "stock_qty": "stock",
+                  "cost_price": "costo", "category": "categoría", "supplier_id": "proveedor"}
+        changes = []
+        for field, new in zip(PRODUCT_FIELDS, vals):
+            prev = old[field]
+            if isinstance(new, float):
+                if abs((prev or 0) - new) > 1e-9:
+                    changes.append(f"{labels[field]} {prev or 0:,.2f} → {new:,.2f}" if field != "stock_qty"
+                                   else f"stock {prev or 0:g} → {new:g}")
+            elif (prev or "") != (new or ""):
+                changes.append(f"{labels[field]} cambiado" if field == "supplier_id"
+                               else f'{labels[field]} "{prev or ""}" → "{new}"')
+        if changes:
+            if old["stock_qty"] != vals[4]:
+                conn.execute(
+                    "INSERT INTO stock_movements (product_id, change_qty, reason, reference, created_at) VALUES (?,?,?,?,?)",
+                    (pid, vals[4] - (old["stock_qty"] or 0), "ajuste manual", g.user["name"], time.time()))
+            log(conn, "producto", pid, f'Editó el producto "{vals[0]}": ' + "; ".join(changes))
     return jsonify({"id": pid})
 
 
@@ -618,7 +835,10 @@ def update_product(pid):
 @require_auth(admin=True)
 def delete_product(pid):
     with get_conn() as conn:
+        old = conn.execute("SELECT name FROM products WHERE id=?", (pid,)).fetchone()
         conn.execute("DELETE FROM products WHERE id=?", (pid,))
+        if old:
+            log(conn, "producto", pid, f'Eliminó el producto "{old["name"]}"')
     return jsonify({"ok": True})
 
 
@@ -630,15 +850,16 @@ def restock_product(pid):
     if qty <= 0:
         raise ApiError("La cantidad a ingresar debe ser mayor que cero.")
     with get_conn() as conn:
-        row = conn.execute("SELECT stock_qty FROM products WHERE id=?", (pid,)).fetchone()
+        row = conn.execute("SELECT name, stock_qty FROM products WHERE id=?", (pid,)).fetchone()
         if not row:
             raise ApiError("Producto no encontrado.", 404)
         new_qty = (row["stock_qty"] or 0) + qty
         conn.execute("UPDATE products SET stock_qty=? WHERE id=?", (new_qty, pid))
         conn.execute(
             "INSERT INTO stock_movements (product_id, change_qty, reason, reference, created_at) VALUES (?,?,?,?,?)",
-            (pid, qty, "reabastecimiento", d.get("note", ""), time.time()),
-        )
+            (pid, qty, "reabastecimiento", text(d, "note"), time.time()))
+        log(conn, "producto", pid, f'Sumó {qty:g} al stock de "{row["name"]}" ({new_qty:g} en total)'
+            + (f" — {text(d, 'note')}" if text(d, "note") else ""))
     return jsonify({"ok": True, "stock_qty": new_qty})
 
 
@@ -647,20 +868,26 @@ INVOICE_SELECT = """
 SELECT i.*,
   (SELECT COALESCE(SUM(qty * price * (1 - COALESCE(discount, 0) / 100.0)), 0)
      FROM invoice_items WHERE invoice_id = i.id) AS net,
-  (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id = i.id) AS paid
+  (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id = i.id) AS paid,
+  (SELECT COALESCE(SUM(amount), 0) FROM returns WHERE invoice_id = i.id) AS returned
 FROM invoices i
 """
 
 
 def _with_totals(row):
-    """Agrega total, pagado, saldo y estado de pago a una fila de INVOICE_SELECT."""
+    """Agrega totales y estado de pago a una fila de INVOICE_SELECT.
+    total = lo que vale la factura después de devoluciones; original_total = lo facturado."""
     inv = dict(row)
     inv["status"] = inv.get("status") or "activa"
-    inv["total"] = money(inv.pop("net") * (1 + (inv.get("tax_rate") or 0) / 100))
+    inv["original_total"] = money(inv.pop("net") * (1 + (inv.get("tax_rate") or 0) / 100))
+    inv["returned"] = money(inv["returned"])
+    inv["total"] = money(inv["original_total"] - inv["returned"])
     inv["paid"] = money(inv["paid"])
     inv["balance"] = money(inv["total"] - inv["paid"])
     if inv["status"] == "anulada":
         state = "anulada"
+    elif inv["returned"] > 0 and inv["total"] <= 0.004:
+        state = "devuelta"
     elif not inv.get("payment_tracking"):
         state = "sin_registro"
     elif inv["balance"] <= 0.004:
@@ -673,18 +900,41 @@ def _with_totals(row):
     return inv
 
 
+def _invoice_rows(conn, where="", params=(), order="ORDER BY i.created_at DESC"):
+    return [_with_totals(r) for r in conn.execute(f"{INVOICE_SELECT} {where} {order}", params).fetchall()]
+
+
+def _ensure_token(conn, inv):
+    if not inv.get("public_token"):
+        inv["public_token"] = secrets.token_urlsafe(16)
+        conn.execute("UPDATE invoices SET public_token=? WHERE id=?", (inv["public_token"], inv["id"]))
+    return inv["public_token"]
+
+
 def _load_invoice(conn, iid):
-    row = conn.execute(INVOICE_SELECT + " WHERE i.id=?", (iid,)).fetchone()
-    if not row:
+    rows = _invoice_rows(conn, "WHERE i.id=?", (iid,))
+    if not rows:
         raise ApiError("Factura no encontrada.", 404)
-    inv = _with_totals(row)
+    inv = rows[0]
     inv["items"] = [dict(i) for i in conn.execute(
         "SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY id", (iid,)).fetchall()]
+    returned_qty = {r["invoice_item_id"]: r["qty"] for r in conn.execute(
+        """SELECT ri.invoice_item_id, SUM(ri.qty) AS qty FROM return_items ri JOIN returns r ON r.id = ri.return_id
+           WHERE r.invoice_id=? GROUP BY ri.invoice_item_id""", (iid,)).fetchall()}
+    for it in inv["items"]:
+        it["returned_qty"] = returned_qty.get(it["id"], 0)
     inv["payments"] = [dict(p) for p in conn.execute(
         "SELECT * FROM payments WHERE invoice_id=? ORDER BY created_at", (iid,)).fetchall()]
-    if g.user["role"] != "admin":
+    inv["returns"] = []
+    for r in conn.execute("SELECT * FROM returns WHERE invoice_id=? ORDER BY created_at", (iid,)).fetchall():
+        ret = dict(r)
+        ret["items"] = [dict(x) for x in conn.execute("SELECT * FROM return_items WHERE return_id=?", (r["id"],))]
+        inv["returns"].append(ret)
+    if not is_admin():
         for it in inv["items"]:
             it.pop("unit_cost", None)
+        for ret in inv["returns"]:
+            ret.pop("cost", None)
     return inv
 
 
@@ -692,8 +942,7 @@ def _load_invoice(conn, iid):
 @require_auth()
 def list_invoices():
     with get_conn() as conn:
-        rows = conn.execute(INVOICE_SELECT + " ORDER BY i.created_at DESC").fetchall()
-        return jsonify([_with_totals(r) for r in rows])
+        return jsonify(_invoice_rows(conn))
 
 
 @app.get("/api/invoices/<iid>")
@@ -701,13 +950,6 @@ def list_invoices():
 def get_invoice(iid):
     with get_conn() as conn:
         return jsonify(_load_invoice(conn, iid))
-
-
-def _parse_payment_method(method):
-    method = (method or "efectivo").strip().lower()
-    if method not in PAYMENT_METHODS:
-        raise ApiError("Método de pago no válido. Usa: " + ", ".join(PAYMENT_METHODS) + ".")
-    return method
 
 
 @app.post("/api/invoices")
@@ -722,7 +964,7 @@ def create_invoice():
         raise ApiError("La forma de pago no es válida.")
     if not items:
         raise ApiError("La factura necesita al menos un artículo.")
-    if not str(client.get("name", "")).strip():
+    if not text(client, "name"):
         raise ApiError("La factura necesita un cliente.")
 
     parsed = []
@@ -761,7 +1003,7 @@ def create_invoice():
                 total = money(net * (1 + tax_rate / 100))
                 pay_amount, pay_method = 0.0, None
                 if payment is not None:
-                    pay_method = _parse_payment_method(payment.get("method"))
+                    pay_method = parse_method(payment.get("method"))
                     if payment.get("mode") == "credito":
                         pay_amount = money(num(payment.get("amount"), "El abono inicial", 0, default=0))
                         if pay_amount > total:
@@ -774,15 +1016,19 @@ def create_invoice():
                 number = f"FAC-{counter:04d}"
                 now = time.time()
                 user = g.user
+                client_id = client.get("id")
+                if client_id and not conn.execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone():
+                    client_id = None
                 conn.execute(
                     """INSERT INTO invoices (id, number, created_at, client_name, client_doc,
                        client_address, client_phone, client_email, tax_rate, notes, warranty, seller,
-                       status, user_id, user_name, payment_tracking)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'activa',?,?,?)""",
-                    (invoice_id, number, now, client.get("name", ""), client.get("doc", ""),
-                     client.get("address", ""), client.get("phone", ""), client.get("email", ""),
-                     tax_rate, d.get("notes", ""), d.get("warranty", ""), d.get("seller", ""),
-                     user["id"], user["name"], 1 if payment is not None else 0),
+                       status, user_id, user_name, payment_tracking, client_id, public_token)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'activa',?,?,?,?,?)""",
+                    (invoice_id, number, now, text(client, "name"), text(client, "doc"),
+                     text(client, "address"), text(client, "phone"), text(client, "email"),
+                     tax_rate, text(d, "notes"), text(d, "warranty"), text(d, "seller"),
+                     user["id"], user["name"], 1 if payment is not None else 0, client_id,
+                     secrets.token_urlsafe(16)),
                 )
                 for pid, qty, price, discount in parsed:
                     product = products[pid]
@@ -805,6 +1051,10 @@ def create_invoice():
                          "Pago al facturar" if payment.get("mode") != "credito" else "Abono inicial",
                          now, user["id"], user["name"]))
                 conn.execute("UPDATE company SET invoice_counter=? WHERE id=1", (counter + 1,))
+                mode = "" if payment is None else (" de contado" if payment.get("mode") != "credito"
+                                                   else f" a crédito (abono {fmt(pay_amount)})")
+                log(conn, "factura", invoice_id,
+                    f'Creó la factura {number} para "{text(client, "name")}" por {fmt(total)}{mode}')
             return jsonify({"id": invoice_id, "number": number, "total": total})
         except sqlite3.IntegrityError:
             with get_conn() as conn2:
@@ -814,16 +1064,42 @@ def create_invoice():
     raise ApiError("No se pudo generar un número de factura único.", 500)
 
 
+def _invoice_pdf_response(conn, inv, inline=False):
+    company = _company(conn)
+    buf = io.BytesIO()
+    generate_invoice_pdf(inv, company, buf)
+    buf.seek(0)
+    return send_file(buf, mimetype="application/pdf", download_name=f'{inv["number"]}.pdf', as_attachment=not inline)
+
+
 @app.get("/api/invoices/<iid>/pdf")
 @require_auth()
 def invoice_pdf(iid):
     with get_conn() as conn:
-        invoice = _load_invoice(conn, iid)
-        company = dict(conn.execute("SELECT * FROM company WHERE id=1").fetchone())
-    buf = io.BytesIO()
-    generate_invoice_pdf(invoice, company, buf)
-    buf.seek(0)
-    return send_file(buf, mimetype="application/pdf", download_name=f'{invoice["number"]}.pdf')
+        return _invoice_pdf_response(conn, _load_invoice(conn, iid))
+
+
+@app.post("/api/invoices/<iid>/share")
+@require_auth()
+def share_invoice(iid):
+    """Devuelve el enlace público del PDF (para enviarlo por WhatsApp)."""
+    with get_conn() as conn:
+        inv = _load_invoice(conn, iid)
+        token = _ensure_token(conn, inv)
+    return jsonify({"path": f"/f/{token}", "public_token": token})
+
+
+@app.get("/f/<token>")
+def public_invoice(token):
+    """Enlace público de una factura: cualquiera con el enlace (largo y aleatorio) ve el PDF."""
+    if len(token) < 16:
+        return "Enlace no válido.", 404
+    with get_conn() as conn:
+        row = conn.execute("SELECT id FROM invoices WHERE public_token=?", (token,)).fetchone()
+        if not row:
+            return "Factura no encontrada. Pide al negocio un enlace nuevo.", 404
+        g.user = {"role": "vendedor"}  # sin costos
+        return _invoice_pdf_response(conn, _load_invoice(conn, row["id"]), inline=True)
 
 
 def _void_invoice(iid, reason):
@@ -831,21 +1107,26 @@ def _void_invoice(iid, reason):
     if not reason:
         raise ApiError("Escribe el motivo de la anulación.")
     with get_conn() as conn:
-        inv = conn.execute("SELECT number, status FROM invoices WHERE id=?", (iid,)).fetchone()
+        inv = conn.execute("SELECT number, status, client_name FROM invoices WHERE id=?", (iid,)).fetchone()
         if not inv:
             raise ApiError("Factura no encontrada.", 404)
         if inv["status"] == "anulada":
             raise ApiError(f'La factura {inv["number"]} ya estaba anulada.')
         now = time.time()
-        for it in conn.execute("SELECT product_id, qty FROM invoice_items WHERE invoice_id=?", (iid,)).fetchall():
-            if it["product_id"]:
-                conn.execute("UPDATE products SET stock_qty = stock_qty + ? WHERE id=?", (it["qty"], it["product_id"]))
+        # se devuelve al inventario lo que no se haya devuelto ya con una devolución parcial
+        returned = {r["invoice_item_id"]: r["qty"] for r in conn.execute(
+            """SELECT ri.invoice_item_id, SUM(ri.qty) AS qty FROM return_items ri JOIN returns r ON r.id = ri.return_id
+               WHERE r.invoice_id=? GROUP BY ri.invoice_item_id""", (iid,)).fetchall()}
+        for it in conn.execute("SELECT id, product_id, qty FROM invoice_items WHERE invoice_id=?", (iid,)).fetchall():
+            qty = it["qty"] - returned.get(it["id"], 0)
+            if it["product_id"] and qty > 0:
+                conn.execute("UPDATE products SET stock_qty = stock_qty + ? WHERE id=?", (qty, it["product_id"]))
                 conn.execute(
                     "INSERT INTO stock_movements (product_id, change_qty, reason, reference, created_at) VALUES (?,?,?,?,?)",
-                    (it["product_id"], it["qty"], "anulación factura", inv["number"], now),
-                )
+                    (it["product_id"], qty, "anulación factura", inv["number"], now))
         conn.execute("UPDATE invoices SET status='anulada', voided_at=?, voided_by=?, void_reason=? WHERE id=?",
                      (now, g.user["name"], reason, iid))
+        log(conn, "factura", iid, f'Anuló la factura {inv["number"]} ({inv["client_name"]}): {reason}')
     return jsonify({"ok": True})
 
 
@@ -859,11 +1140,79 @@ def void_invoice(iid):
 @require_auth(admin=True)
 def delete_invoice(iid):
     # Las facturas no se borran (la numeración debe quedar completa): las apps
-    # de escritorio antiguas que llaman a "eliminar" en realidad la anulan.
+    # antiguas que llaman a "eliminar" en realidad la anulan.
     return _void_invoice(iid, "Anulada desde una versión anterior de la app")
 
 
-# ---------- pagos ----------
+# ---------- devoluciones parciales ----------
+@app.post("/api/invoices/<iid>/returns")
+@require_auth(admin=True)
+def create_return(iid):
+    d = body()
+    reason = text(d, "reason")
+    if not reason:
+        raise ApiError("Escribe el motivo de la devolución.")
+    wanted = {}
+    for it in d.get("items") or []:
+        qty = num(it.get("qty"), "La cantidad devuelta", 0, default=0)
+        if qty > 0:
+            wanted[int(it.get("item_id"))] = qty
+    if not wanted:
+        raise ApiError("Indica al menos un artículo y la cantidad que se devuelve.")
+    refund_method = parse_method(d.get("refund_method"))
+    with get_conn() as conn:
+        inv = _load_invoice(conn, iid)
+        if inv["status"] == "anulada":
+            raise ApiError("La factura está anulada: no se le pueden hacer devoluciones.")
+        items = {it["id"]: it for it in inv["items"]}
+        lines, amount, net, cost = [], 0.0, 0.0, 0.0
+        tax = (inv["tax_rate"] or 0) / 100
+        for item_id, qty in wanted.items():
+            it = items.get(item_id)
+            if not it:
+                raise ApiError("Uno de los artículos no pertenece a esta factura.")
+            available = it["qty"] - it["returned_qty"]
+            if qty > available + 1e-9:
+                raise ApiError(f'De "{it["description"]}" solo se pueden devolver {available:g}.')
+            line_net = qty * it["price"] * (1 - (it["discount"] or 0) / 100)
+            lines.append((it, qty, money(line_net * (1 + tax))))
+            net += line_net
+            amount += line_net * (1 + tax)
+            cost += qty * (it.get("unit_cost") or 0)
+        amount = money(amount)
+        # Si el cliente ya pagó más de lo que vale la factura tras la devolución, se le devuelve la diferencia.
+        new_total = inv["total"] - amount
+        refund = money(max(0.0, inv["paid"] - max(new_total, 0))) if inv["payment_tracking"] else 0.0
+        refund = min(refund, amount)
+        rid = str(uuid.uuid4())
+        now = time.time()
+        conn.execute(
+            """INSERT INTO returns (id, invoice_id, amount, net, cost, refund, refund_method, reason, created_at, user_id, user_name)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (rid, iid, amount, money(net), money(cost), refund, refund_method if refund else None, reason, now,
+             g.user["id"], g.user["name"]))
+        for it, qty, line_amount in lines:
+            conn.execute(
+                "INSERT INTO return_items (return_id, invoice_item_id, product_id, description, qty, amount) VALUES (?,?,?,?,?,?)",
+                (rid, it["id"], it["product_id"], it["description"], qty, line_amount))
+            if it["product_id"]:
+                conn.execute("UPDATE products SET stock_qty = stock_qty + ? WHERE id=?", (qty, it["product_id"]))
+                conn.execute(
+                    "INSERT INTO stock_movements (product_id, change_qty, reason, reference, created_at) VALUES (?,?,?,?,?)",
+                    (it["product_id"], qty, "devolución", inv["number"], now))
+        if refund > 0:
+            conn.execute(
+                """INSERT INTO payments (id, invoice_id, amount, method, note, created_at, user_id, user_name)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (str(uuid.uuid4()), iid, -refund, refund_method, "Dinero devuelto al cliente (devolución)", now,
+                 g.user["id"], g.user["name"]))
+        detail = ", ".join(f'{qty:g} × {it["description"]}' for it, qty, _a in lines)
+        log(conn, "factura", iid, f'Registró una devolución en {inv["number"]} por {fmt(amount)} ({detail}): {reason}'
+            + (f"; se devolvieron {fmt(refund)} en {refund_method}" if refund else ""))
+        return jsonify(_load_invoice(conn, iid))
+
+
+# ---------- pagos de facturas ----------
 @app.post("/api/invoices/<iid>/payments")
 @require_auth()
 def add_payment(iid):
@@ -871,21 +1220,20 @@ def add_payment(iid):
     amount = money(num(d.get("amount"), "El monto", 0))
     if amount <= 0:
         raise ApiError("El monto del pago debe ser mayor que cero.")
-    method = _parse_payment_method(d.get("method"))
+    method = parse_method(d.get("method"))
     with get_conn() as conn:
         inv = _load_invoice(conn, iid)
         if inv["status"] == "anulada":
             raise ApiError("No se pueden registrar pagos en una factura anulada.")
-        if inv["payment_tracking"] and amount > inv["balance"] + 0.004:
-            raise ApiError(f'El pago supera el saldo pendiente ({inv["balance"]:,.2f}).')
-        if not inv["payment_tracking"] and amount > inv["total"] + 0.004:
-            raise ApiError(f'El pago supera el total de la factura ({inv["total"]:,.2f}).')
+        limit = inv["balance"] if inv["payment_tracking"] else inv["total"]
+        if amount > limit + 0.004:
+            raise ApiError(f"El pago supera el saldo pendiente ({fmt(limit)}).")
         conn.execute(
             """INSERT INTO payments (id, invoice_id, amount, method, note, created_at, user_id, user_name)
                VALUES (?,?,?,?,?,?,?,?)""",
-            (str(uuid.uuid4()), iid, amount, method, str(d.get("note", "")).strip(), time.time(),
-             g.user["id"], g.user["name"]))
+            (str(uuid.uuid4()), iid, amount, method, text(d, "note"), time.time(), g.user["id"], g.user["name"]))
         conn.execute("UPDATE invoices SET payment_tracking=1 WHERE id=?", (iid,))
+        log(conn, "factura", iid, f'Registró un pago de {fmt(amount)} ({method}) en {inv["number"]}')
         return jsonify(_load_invoice(conn, iid))
 
 
@@ -893,8 +1241,372 @@ def add_payment(iid):
 @require_auth(admin=True)
 def delete_payment(pay_id):
     with get_conn() as conn:
-        conn.execute("DELETE FROM payments WHERE id=?", (pay_id,))
+        p = conn.execute("""SELECT p.*, i.number FROM payments p JOIN invoices i ON i.id = p.invoice_id
+                            WHERE p.id=?""", (pay_id,)).fetchone()
+        if p:
+            conn.execute("DELETE FROM payments WHERE id=?", (pay_id,))
+            log(conn, "factura", p["invoice_id"], f'Quitó un pago de {fmt(p["amount"])} ({p["method"]}) de {p["number"]}')
     return jsonify({"ok": True})
+
+
+# ---------- compras a proveedores ----------
+PURCHASE_SELECT = """
+SELECT p.*,
+  (SELECT COALESCE(SUM(qty * unit_cost), 0) FROM purchase_items WHERE purchase_id = p.id) AS total,
+  (SELECT COALESCE(SUM(amount), 0) FROM supplier_payments WHERE purchase_id = p.id) AS paid
+FROM purchases p
+"""
+
+
+def _purchase_totals(row):
+    p = dict(row)
+    p["total"], p["paid"] = money(p["total"]), money(p["paid"])
+    p["balance"] = money(p["total"] - p["paid"]) if p["status"] != "anulada" else 0.0
+    if p["status"] == "anulada":
+        p["payment_status"] = "anulada"
+    elif p["balance"] <= 0.004:
+        p["payment_status"] = "pagada"
+    elif p["paid"] > 0:
+        p["payment_status"] = "abono"
+    else:
+        p["payment_status"] = "pendiente"
+    return p
+
+
+def _purchase_rows(conn, where="", params=()):
+    return [_purchase_totals(r) for r in conn.execute(f"{PURCHASE_SELECT} {where} ORDER BY p.created_at DESC", params)]
+
+
+def _load_purchase(conn, pid):
+    rows = _purchase_rows(conn, "WHERE p.id=?", (pid,))
+    if not rows:
+        raise ApiError("Compra no encontrada.", 404)
+    p = rows[0]
+    p["items"] = [dict(r) for r in conn.execute("SELECT * FROM purchase_items WHERE purchase_id=? ORDER BY id", (pid,))]
+    p["payments"] = [dict(r) for r in conn.execute(
+        "SELECT * FROM supplier_payments WHERE purchase_id=? ORDER BY created_at", (pid,))]
+    return p
+
+
+@app.get("/api/purchases")
+@require_auth(admin=True)
+def list_purchases():
+    with get_conn() as conn:
+        if request.args.get("supplier_id"):
+            return jsonify(_purchase_rows(conn, "WHERE p.supplier_id=?", (request.args["supplier_id"],)))
+        return jsonify(_purchase_rows(conn))
+
+
+@app.get("/api/purchases/<pid>")
+@require_auth(admin=True)
+def get_purchase(pid):
+    with get_conn() as conn:
+        return jsonify(_load_purchase(conn, pid))
+
+
+@app.post("/api/purchases")
+@require_auth(admin=True)
+def create_purchase():
+    d = body()
+    payment = d.get("payment") or {"mode": "contado", "method": "efectivo"}
+    if not isinstance(payment, dict):
+        raise ApiError("La forma de pago no es válida.")
+    lines = []
+    for it in d.get("items") or []:
+        qty = num(it.get("qty"), "La cantidad", 0)
+        if qty <= 0:
+            raise ApiError("Todas las cantidades deben ser mayores que cero.")
+        lines.append((it.get("product_id"), qty, num(it.get("unit_cost"), "El costo unitario", 0)))
+    if not lines:
+        raise ApiError("La compra necesita al menos un producto.")
+    with get_conn() as conn:
+        supplier = conn.execute("SELECT * FROM suppliers WHERE id=?", (d.get("supplier_id"),)).fetchone()
+        if not supplier:
+            raise ApiError("Elige el proveedor de la compra.")
+        products = {}
+        for pid, _q, _c in lines:
+            p = conn.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()
+            if not p:
+                raise ApiError("Uno de los productos ya no existe en el catálogo.")
+            products[pid] = p
+        total = money(sum(q * c for _p, q, c in lines))
+        method = parse_method(payment.get("method"))
+        if payment.get("mode") == "credito":
+            pay_amount = money(num(payment.get("amount"), "El abono inicial", 0, default=0))
+            if pay_amount > total:
+                raise ApiError("El abono inicial no puede ser mayor que el total de la compra.")
+        else:
+            pay_amount = total
+        counter = conn.execute("SELECT purchase_counter FROM company WHERE id=1").fetchone()["purchase_counter"] or 1
+        number = f"COM-{counter:04d}"
+        pur_id, now = str(uuid.uuid4()), time.time()
+        conn.execute(
+            """INSERT INTO purchases (id, number, supplier_id, supplier_name, supplier_ref, notes, created_at,
+               user_id, user_name, status) VALUES (?,?,?,?,?,?,?,?,?,'activa')""",
+            (pur_id, number, supplier["id"], supplier["name"], text(d, "supplier_ref"), text(d, "notes"), now,
+             g.user["id"], g.user["name"]))
+        for pid, qty, unit_cost in lines:
+            # el producto ya pudo cambiar en una línea anterior de esta misma compra
+            p = conn.execute("SELECT stock_qty, cost_price FROM products WHERE id=?", (pid,)).fetchone()
+            old_stock, old_cost = max(p["stock_qty"] or 0, 0), p["cost_price"] or 0
+            # costo promedio ponderado entre lo que había y lo que llega
+            new_cost = ((old_stock * old_cost + qty * unit_cost) / (old_stock + qty)) if old_stock > 0 else unit_cost
+            conn.execute("INSERT INTO purchase_items (purchase_id, product_id, description, qty, unit_cost) VALUES (?,?,?,?,?)",
+                         (pur_id, pid, products[pid]["name"], qty, unit_cost))
+            conn.execute("UPDATE products SET stock_qty = stock_qty + ?, cost_price=? WHERE id=?",
+                         (qty, round(new_cost, 4), pid))
+            conn.execute(
+                "INSERT INTO stock_movements (product_id, change_qty, reason, reference, created_at) VALUES (?,?,?,?,?)",
+                (pid, qty, "compra", number, now))
+        if pay_amount > 0:
+            conn.execute(
+                """INSERT INTO supplier_payments (id, purchase_id, amount, method, note, created_at, user_id, user_name)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (str(uuid.uuid4()), pur_id, pay_amount, method,
+                 "Pago al comprar" if payment.get("mode") != "credito" else "Abono inicial", now,
+                 g.user["id"], g.user["name"]))
+        conn.execute("UPDATE company SET purchase_counter=? WHERE id=1", (counter + 1,))
+        log(conn, "compra", pur_id, f'Registró la compra {number} a "{supplier["name"]}" por {fmt(total)}'
+            + (" de contado" if payment.get("mode") != "credito" else f" a crédito (abono {fmt(pay_amount)})"))
+        return jsonify({"id": pur_id, "number": number, "total": total})
+
+
+@app.post("/api/purchases/<pid>/payments")
+@require_auth(admin=True)
+def add_supplier_payment(pid):
+    d = body()
+    amount = money(num(d.get("amount"), "El monto", 0))
+    if amount <= 0:
+        raise ApiError("El monto del pago debe ser mayor que cero.")
+    method = parse_method(d.get("method"))
+    with get_conn() as conn:
+        p = _load_purchase(conn, pid)
+        if p["status"] == "anulada":
+            raise ApiError("La compra está anulada.")
+        if amount > p["balance"] + 0.004:
+            raise ApiError(f"El pago supera lo que se le debe al proveedor ({fmt(p['balance'])}).")
+        conn.execute(
+            """INSERT INTO supplier_payments (id, purchase_id, amount, method, note, created_at, user_id, user_name)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (str(uuid.uuid4()), pid, amount, method, text(d, "note"), time.time(), g.user["id"], g.user["name"]))
+        log(conn, "compra", pid, f'Pagó {fmt(amount)} ({method}) al proveedor "{p["supplier_name"]}" por la compra {p["number"]}')
+        return jsonify(_load_purchase(conn, pid))
+
+
+@app.post("/api/purchases/<pid>/void")
+@require_auth(admin=True)
+def void_purchase(pid):
+    reason = text(body(), "reason")
+    if not reason:
+        raise ApiError("Escribe el motivo de la anulación.")
+    with get_conn() as conn:
+        p = _load_purchase(conn, pid)
+        if p["status"] == "anulada":
+            raise ApiError("La compra ya estaba anulada.")
+        for it in p["items"]:
+            prod = conn.execute("SELECT name, stock_qty FROM products WHERE id=?", (it["product_id"],)).fetchone()
+            if prod and (prod["stock_qty"] or 0) + 1e-9 < it["qty"]:
+                raise ApiError(f'No se puede anular: de "{prod["name"]}" ya no quedan {it["qty"]:g} en inventario '
+                               f'(hay {prod["stock_qty"]:g}). Ajusta el stock primero.')
+        now = time.time()
+        for it in p["items"]:
+            conn.execute("UPDATE products SET stock_qty = stock_qty - ? WHERE id=?", (it["qty"], it["product_id"]))
+            conn.execute(
+                "INSERT INTO stock_movements (product_id, change_qty, reason, reference, created_at) VALUES (?,?,?,?,?)",
+                (it["product_id"], -it["qty"], "anulación compra", p["number"], now))
+        conn.execute("UPDATE purchases SET status='anulada', voided_at=?, voided_by=?, void_reason=? WHERE id=?",
+                     (now, g.user["name"], reason, pid))
+        log(conn, "compra", pid, f'Anuló la compra {p["number"]} ({p["supplier_name"]}): {reason}')
+    return jsonify({"ok": True})
+
+
+# ---------- gastos ----------
+@app.get("/api/expenses")
+@require_auth()
+def list_expenses():
+    now = time.time()
+    start = num(request.args.get("start"), "start", default=now - 31 * 86400)
+    end = num(request.args.get("end"), "end", default=now + 86400)
+    where, params = "WHERE e.spent_at >= ? AND e.spent_at < ?", [start, end]
+    if not is_admin():
+        where += " AND e.user_id = ?"
+        params.append(g.user["id"])
+    with get_conn() as conn:
+        rows = conn.execute(f"""SELECT e.*, s.name AS supplier_name FROM expenses e
+                                LEFT JOIN suppliers s ON s.id = e.supplier_id {where}
+                                ORDER BY e.spent_at DESC""", params).fetchall()
+        categories = [r[0] for r in conn.execute(
+            "SELECT DISTINCT category FROM expenses WHERE category <> '' ORDER BY category COLLATE NOCASE")]
+    return jsonify({"expenses": [dict(r) for r in rows], "categories": categories})
+
+
+@app.post("/api/expenses")
+@require_auth()
+def create_expense():
+    d = body()
+    amount = money(num(d.get("amount"), "El monto", 0))
+    if amount <= 0:
+        raise ApiError("El monto del gasto debe ser mayor que cero.")
+    category = text(d, "category")
+    description = text(d, "description")
+    if not category and not description:
+        raise ApiError("Escribe la categoría o la descripción del gasto.")
+    spent_at = num(d.get("spent_at"), "La fecha", default=time.time())
+    method = parse_method(d.get("method"))
+    eid = str(uuid.uuid4())
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO expenses (id, spent_at, category, description, amount, method, supplier_id, created_at, user_id, user_name)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (eid, spent_at, category, description, amount, method, d.get("supplier_id") or None, time.time(),
+             g.user["id"], g.user["name"]))
+        log(conn, "gasto", eid, f"Registró un gasto de {fmt(amount)} ({method}): {category or ''} {description}".strip())
+    return jsonify({"id": eid})
+
+
+@app.delete("/api/expenses/<eid>")
+@require_auth(admin=True)
+def delete_expense(eid):
+    with get_conn() as conn:
+        e = conn.execute("SELECT * FROM expenses WHERE id=?", (eid,)).fetchone()
+        if e:
+            conn.execute("DELETE FROM expenses WHERE id=?", (eid,))
+            log(conn, "gasto", eid, f'Eliminó un gasto de {fmt(e["amount"])}: {e["category"]} {e["description"]}'.strip())
+    return jsonify({"ok": True})
+
+
+# ---------- cierre de caja ----------
+def _cash_scope():
+    """Quién: el vendedor solo ve su propia caja; el administrador elige a alguien o 'todos'."""
+    if not is_admin():
+        return g.user["id"], g.user["name"]
+    uid = request.args.get("user_id") or (request.get_json(silent=True) or {}).get("user_id") or ""
+    if uid in ("", "all"):
+        return None, "Todos"
+    with get_conn() as conn:
+        u = conn.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone()
+    if not u:
+        raise ApiError("Usuario no encontrado.", 404)
+    return uid, u["name"]
+
+
+def _cash_summary(conn, day, tz, scope_uid):
+    start, end = day_bounds(day, tz)
+    flt, extra = ("AND p.user_id = ?", [scope_uid]) if scope_uid else ("", [])
+    sums = lambda sql: {r["method"]: money(r["amount"]) for r in conn.execute(sql, [start, end] + extra)}  # noqa: E731
+    received = sums(f"""SELECT p.method, SUM(p.amount) AS amount FROM payments p JOIN invoices i ON i.id = p.invoice_id
+                        WHERE p.created_at >= ? AND p.created_at < ? AND p.amount > 0 {flt} GROUP BY p.method""")
+    refunded = sums(f"""SELECT p.method, -SUM(p.amount) AS amount FROM payments p
+                        WHERE p.created_at >= ? AND p.created_at < ? AND p.amount < 0 {flt} GROUP BY p.method""")
+    supplier = sums(f"""SELECT p.method, SUM(p.amount) AS amount FROM supplier_payments p
+                        WHERE p.created_at >= ? AND p.created_at < ? {flt} GROUP BY p.method""")
+    expenses = sums(f"""SELECT p.method, SUM(p.amount) AS amount FROM expenses p
+                        WHERE p.spent_at >= ? AND p.spent_at < ? {flt} GROUP BY p.method""")
+    expected = {m: money(received.get(m, 0) - refunded.get(m, 0) - supplier.get(m, 0) - expenses.get(m, 0))
+                for m in PAYMENT_METHODS}
+    return {"received": received, "refunded": refunded, "supplier_payments": supplier, "expenses": expenses,
+            "expected": expected}
+
+
+@app.get("/api/cash")
+@require_auth()
+def cash_day():
+    day = request.args.get("day") or datetime.date.today().isoformat()
+    tz = tz_offset_arg()
+    scope_uid, scope_name = _cash_scope()
+    with get_conn() as conn:
+        summary = _cash_summary(conn, day, tz, scope_uid)
+        closing = conn.execute("SELECT * FROM cash_closings WHERE day=? AND COALESCE(scope_user_id,'')=?",
+                               (day, scope_uid or "")).fetchone()
+    result = {"day": day, "scope_user_id": scope_uid, "scope_name": scope_name, **summary, "closing": None}
+    if closing:
+        c = dict(closing)
+        c["expected"], c["counted"] = _json(c["expected"]), _json(c["counted"])
+        result["closing"] = c
+    return jsonify(result)
+
+
+def _json(s):
+    return json.loads(s) if s else {}
+
+
+@app.post("/api/cash/closings")
+@require_auth()
+def create_closing():
+    d = body()
+    day = text(d, "day")
+    tz = num(d.get("tz"), "tz", -14 * 60, 14 * 60, default=0)
+    scope_uid, scope_name = _cash_scope()
+    opening = money(num(d.get("opening_cash"), "La base de caja", 0, default=0))
+    counted_in = d.get("counted") or {}
+    counted = {m: money(num(counted_in.get(m), f"Lo contado en {m}", 0, default=0)) for m in PAYMENT_METHODS}
+    with get_conn() as conn:
+        summary = _cash_summary(conn, day, tz, scope_uid)
+        expected = dict(summary["expected"])
+        expected["efectivo"] = money(expected["efectivo"] + opening)
+        difference = money(sum(counted.values()) - sum(expected.values()))
+        cid = str(uuid.uuid4())
+        try:
+            conn.execute(
+                """INSERT INTO cash_closings (id, day, scope_user_id, scope_name, opening_cash, expected, counted,
+                   difference, notes, created_at, user_id, user_name) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (cid, day, scope_uid, scope_name, opening, json.dumps(expected), json.dumps(counted), difference,
+                 text(d, "notes"), time.time(), g.user["id"], g.user["name"]))
+        except sqlite3.IntegrityError:
+            raise ApiError(f"La caja de {scope_name} del {day} ya se cerró. Un administrador puede borrar ese cierre "
+                           "si hay que repetirlo.")
+        state = "cuadró" if abs(difference) < 0.005 else (f"sobraron {fmt(difference)}" if difference > 0
+                                                          else f"faltaron {fmt(-difference)}")
+        log(conn, "caja", cid, f"Cerró la caja de {scope_name} del {day}: {state}")
+    return jsonify({"id": cid, "difference": difference, "expected": expected})
+
+
+@app.get("/api/cash/closings")
+@require_auth()
+def list_closings():
+    where, params = "", []
+    if not is_admin():
+        where, params = "WHERE scope_user_id = ?", [g.user["id"]]
+    with get_conn() as conn:
+        rows = [dict(r) for r in conn.execute(
+            f"SELECT * FROM cash_closings {where} ORDER BY day DESC, created_at DESC LIMIT 60", params)]
+    for r in rows:
+        r["expected"], r["counted"] = _json(r["expected"]), _json(r["counted"])
+    return jsonify(rows)
+
+
+@app.delete("/api/cash/closings/<cid>")
+@require_auth(admin=True)
+def delete_closing(cid):
+    with get_conn() as conn:
+        c = conn.execute("SELECT * FROM cash_closings WHERE id=?", (cid,)).fetchone()
+        if c:
+            conn.execute("DELETE FROM cash_closings WHERE id=?", (cid,))
+            log(conn, "caja", cid, f'Borró el cierre de caja de {c["scope_name"]} del {c["day"]}')
+    return jsonify({"ok": True})
+
+
+# ---------- registro de actividad (solo administrador) ----------
+@app.get("/api/activity")
+@require_auth(admin=True)
+def activity():
+    limit = int(num(request.args.get("limit"), "limit", 1, 500, default=100))
+    where, params = [], []
+    if request.args.get("before"):
+        where.append("created_at < ?")
+        params.append(num(request.args.get("before"), "before"))
+    q = (request.args.get("q") or "").strip()
+    if q:
+        where.append("(summary LIKE ? OR user_name LIKE ?)")
+        params += [f"%{q}%", f"%{q}%"]
+    if request.args.get("entity"):
+        where.append("entity = ?")
+        params.append(request.args["entity"])
+    sql = "SELECT * FROM activity_log" + (" WHERE " + " AND ".join(where) if where else "") + \
+          " ORDER BY created_at DESC, id DESC LIMIT ?"
+    with get_conn() as conn:
+        rows = [dict(r) for r in conn.execute(sql, params + [limit])]
+    return jsonify(rows)
 
 
 # ---------- resumen de ventas (solo administrador) ----------
@@ -904,33 +1616,47 @@ def dashboard():
     now = time.time()
     start = num(request.args.get("start"), "start", default=now - 30 * 86400)
     end = num(request.args.get("end"), "end", default=now)
-    tz_offset = num(request.args.get("tz"), "tz", -14 * 60, 14 * 60, default=0)  # minutos, como JS getTimezoneOffset()
+    tz_offset = tz_offset_arg()
 
     def local_day(ts):
         return datetime.datetime.fromtimestamp(ts - tz_offset * 60, datetime.timezone.utc).date()
 
+    active = "COALESCE(i.status,'activa') <> 'anulada'"
     with get_conn() as conn:
-        invoices = [_with_totals(r) for r in conn.execute(
-            INVOICE_SELECT + " WHERE i.created_at >= ? AND i.created_at < ? AND COALESCE(i.status,'activa') <> 'anulada'",
-            (start, end)).fetchall()]
+        invoices = _invoice_rows(conn, f"WHERE i.created_at >= ? AND i.created_at < ? AND {active}", (start, end))
         items = conn.execute(
-            """SELECT it.*, COALESCE(it.unit_cost, p.cost_price, 0) AS cost, i.tax_rate FROM invoice_items it
+            f"""SELECT it.*, COALESCE(it.unit_cost, p.cost_price, 0) AS cost FROM invoice_items it
                JOIN invoices i ON i.id = it.invoice_id LEFT JOIN products p ON p.id = it.product_id
-               WHERE i.created_at >= ? AND i.created_at < ? AND COALESCE(i.status,'activa') <> 'anulada'""",
-            (start, end)).fetchall()
+               WHERE i.created_at >= ? AND i.created_at < ? AND {active}""", (start, end)).fetchall()
+        rets = conn.execute(
+            f"""SELECT r.* FROM returns r JOIN invoices i ON i.id = r.invoice_id
+                WHERE r.created_at >= ? AND r.created_at < ? AND {active}""", (start, end)).fetchall()
+        ret_items = conn.execute(
+            f"""SELECT ri.product_id, ri.description, ri.qty, ri.amount, i.tax_rate FROM return_items ri
+                JOIN returns r ON r.id = ri.return_id JOIN invoices i ON i.id = r.invoice_id
+                WHERE r.created_at >= ? AND r.created_at < ? AND {active}""", (start, end)).fetchall()
         payments = conn.execute(
-            """SELECT p.method, SUM(p.amount) AS amount FROM payments p JOIN invoices i ON i.id = p.invoice_id
-               WHERE p.created_at >= ? AND p.created_at < ? AND COALESCE(i.status,'activa') <> 'anulada'
+            f"""SELECT p.method, SUM(p.amount) AS amount FROM payments p JOIN invoices i ON i.id = p.invoice_id
+               WHERE p.created_at >= ? AND p.created_at < ? AND {active}
                GROUP BY p.method ORDER BY amount DESC""", (start, end)).fetchall()
-        receivables = [_with_totals(r) for r in conn.execute(
-            INVOICE_SELECT + " WHERE COALESCE(i.status,'activa') <> 'anulada' AND i.payment_tracking = 1"
-            " ORDER BY i.created_at").fetchall()]
-    receivables = [r for r in receivables if r["balance"] > 0.004]
+        receivables = [r for r in _invoice_rows(conn, f"WHERE {active} AND i.payment_tracking = 1", order="ORDER BY i.created_at")
+                       if r["balance"] > 0.004]
+        expenses = conn.execute(
+            """SELECT COALESCE(NULLIF(category,''),'Sin categoría') AS category, SUM(amount) AS amount FROM expenses
+               WHERE spent_at >= ? AND spent_at < ? GROUP BY 1 ORDER BY amount DESC""", (start, end)).fetchall()
+        purchases = _purchase_rows(conn, "WHERE p.created_at >= ? AND p.created_at < ? AND p.status <> 'anulada'", (start, end))
+        payables = [p for p in _purchase_rows(conn, "WHERE p.status <> 'anulada'") if p["balance"] > 0.004]
 
     gross = sum(i["qty"] * i["price"] for i in items)
     net = sum(i["qty"] * i["price"] * (1 - (i["discount"] or 0) / 100) for i in items)
     cost = sum(i["qty"] * (i["cost"] or 0) for i in items)
-    total = sum(inv["total"] for inv in invoices)
+    total = sum(inv["original_total"] for inv in invoices)
+    ret_total = sum(r["amount"] for r in rets)
+    ret_net = sum(r["net"] for r in rets)
+    ret_cost = sum(r["cost"] or 0 for r in rets)
+    expense_total = sum(e["amount"] for e in expenses)
+    sales_net = net - ret_net
+    profit = sales_net - (cost - ret_cost)
 
     products = {}
     for i in items:
@@ -938,13 +1664,18 @@ def dashboard():
         p = products.setdefault(key, {"name": i["description"], "qty": 0, "net": 0.0})
         p["qty"] += i["qty"]
         p["net"] += i["qty"] * i["price"] * (1 - (i["discount"] or 0) / 100)
+    for r in ret_items:
+        key = r["product_id"] or r["description"]
+        if key in products:
+            products[key]["qty"] -= r["qty"]
+            products[key]["net"] -= r["amount"] / (1 + (r["tax_rate"] or 0) / 100)
 
     sellers = {}
     for inv in invoices:
         name = (inv.get("seller") or "").strip() or inv.get("user_name") or "Sin vendedor"
         s = sellers.setdefault(name, {"name": name, "count": 0, "total": 0.0})
         s["count"] += 1
-        s["total"] += inv["total"]
+        s["total"] += inv["original_total"]
 
     # serie por día (o por mes si el período es largo), con ceros en los días sin ventas
     first, last = local_day(start), local_day(max(start, end - 1))
@@ -959,13 +1690,16 @@ def dashboard():
         d = local_day(inv["created_at"])
         key = d.strftime("%Y-%m") if monthly else d.isoformat()
         if key in buckets:
-            buckets[key]["total"] += inv["total"]
+            buckets[key]["total"] += inv["original_total"]
             buckets[key]["count"] += 1
 
     return jsonify({
         "summary": {
-            "count": len(invoices), "gross": money(gross), "discount": money(gross - net), "net": money(net),
-            "tax": money(total - net), "total": money(total), "cost": money(cost), "profit": money(net - cost),
+            "count": len(invoices), "gross": money(gross), "discount": money(gross - net),
+            "net": money(sales_net), "tax": money(total - net - (ret_total - ret_net)),
+            "total": money(total - ret_total), "returns": money(ret_total), "returns_count": len(rets),
+            "cost": money(cost - ret_cost), "profit": money(profit),
+            "expenses": money(expense_total), "net_profit": money(profit - expense_total),
             "avg_ticket": money(total / len(invoices)) if invoices else 0,
             "items_without_cost": sum(1 for i in items if not i["cost"]),
         },
@@ -973,13 +1707,16 @@ def dashboard():
                    "points": [dict(b, total=money(b["total"])) for b in buckets.values()]},
         "collected": {"total": money(sum(p["amount"] for p in payments)),
                       "by_method": [{"method": p["method"], "amount": money(p["amount"])} for p in payments]},
-        "top_products": sorted(({**p, "net": money(p["net"])} for p in products.values()),
+        "top_products": sorted(({**p, "net": money(p["net"])} for p in products.values() if p["qty"] > 1e-9),
                                key=lambda p: -p["net"])[:10],
         "by_seller": sorted(({**s, "total": money(s["total"])} for s in sellers.values()),
                             key=lambda s: -s["total"]),
+        "expenses_by_category": [{"category": e["category"], "amount": money(e["amount"])} for e in expenses],
+        "purchases": {"total": money(sum(p["total"] for p in purchases)), "count": len(purchases)},
+        "payables": {"total": money(sum(p["balance"] for p in payables)), "count": len(payables)},
         "receivables": {
             "total": money(sum(r["balance"] for r in receivables)), "count": len(receivables),
-            "invoices": [{k: r[k] for k in ("id", "number", "client_name", "created_at", "total", "balance")}
+            "invoices": [{k: r[k] for k in ("id", "number", "client_name", "client_id", "created_at", "total", "balance")}
                          for r in receivables[:50]],
         },
     })
@@ -1042,6 +1779,8 @@ def download_backup():
             data = io.BytesIO(f.read())
     finally:
         os.remove(tmp)
+    with get_conn() as conn:
+        log(conn, "empresa", "1", "Descargó una copia de seguridad")
     return send_file(data, mimetype="application/octet-stream", as_attachment=True,
                      download_name=f"facturador-copia-{datetime.datetime.now():%Y-%m-%d_%H%M}.db")
 
