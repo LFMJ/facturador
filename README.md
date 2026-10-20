@@ -23,7 +23,9 @@ FACTURADOR_API_KEY=clave-de-prueba python -m flask --app app run --port 5050
 
 ## Qué hace
 
-- **Facturas**: los artículos salen del catálogo y descuentan el inventario;
+- **Facturas**: los artículos salen del catálogo y descuentan el inventario; los
+  precios ya incluyen el IVA (la factura lo desglosa); **venta rápida a
+  Consumidor final** sin crear cliente;
   descuento por línea; pagada ahora o a crédito (con abono); PDF para descargar
   y **envío por WhatsApp con el PDF adjunto** (desde el menú "Compartir" del
   celular; en el computador se descarga y se abre el chat del cliente).
@@ -33,7 +35,9 @@ FACTURADOR_API_KEY=clave-de-prueba python -m flask --app app run --port 5050
   borran, para no dejar huecos en la numeración).
 - **Clientes**: saldo de cada uno, **estado de cuenta** en PDF y **recordatorio
   de pago por WhatsApp** con el estado de cuenta adjunto.
-- **Productos** con **categorías**, existencias y costo.
+- **Productos** con **categorías**, existencias y costo; **importación desde
+  Excel o CSV** (con vista previa) y plantilla con los productos actuales para
+  cambiar precios en bloque.
 - **Compras a proveedores**: la mercancía que llega suma al inventario y
   actualiza el costo (promedio ponderado); compras a crédito con abonos y
   saldo por pagar a cada proveedor.

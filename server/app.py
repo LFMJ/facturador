@@ -17,17 +17,20 @@ Acceso:
 Despliegue gratuito sugerido: PythonAnywhere (ver DEPLOY.md).
 """
 import base64
+import csv
 import datetime
 import hashlib
 import hmac
 import io
 import json
 import os
+import re
 import secrets
 import sqlite3
 import sys
 import tempfile
 import time
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from functools import wraps
@@ -87,7 +90,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     tax_rate REAL DEFAULT 0, notes TEXT DEFAULT '', warranty TEXT DEFAULT '', seller TEXT DEFAULT '',
     status TEXT DEFAULT 'activa', voided_at REAL, voided_by TEXT DEFAULT '', void_reason TEXT DEFAULT '',
     user_id TEXT, user_name TEXT DEFAULT '', payment_tracking INTEGER DEFAULT 0,
-    client_id TEXT, public_token TEXT
+    client_id TEXT, public_token TEXT, tax_included INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS invoice_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,6 +178,8 @@ MIGRATIONS = [
     ("invoices", "client_id", "ALTER TABLE invoices ADD COLUMN client_id TEXT"),
     # public_token: enlaces públicos de facturas, ya retirados (la columna queda sin uso)
     ("invoices", "public_token", "ALTER TABLE invoices ADD COLUMN public_token TEXT"),
+    # 1 = el precio de los artículos ya trae el IVA (se desglosa); 0 = facturas viejas, el IVA se sumaba aparte.
+    ("invoices", "tax_included", "ALTER TABLE invoices ADD COLUMN tax_included INTEGER DEFAULT 0"),
     ("invoice_items", "product_id", "ALTER TABLE invoice_items ADD COLUMN product_id TEXT"),
     ("invoice_items", "discount", "ALTER TABLE invoice_items ADD COLUMN discount REAL DEFAULT 0"),
     ("invoice_items", "unit_cost", "ALTER TABLE invoice_items ADD COLUMN unit_cost REAL"),
@@ -885,6 +890,247 @@ def restock_product(pid):
     return jsonify({"ok": True, "stock_qty": new_qty})
 
 
+# ---------- importar productos desde Excel / CSV ----------
+IMPORT_MAX_BYTES = 5 * 1024 * 1024
+IMPORT_MAX_ROWS = 5000
+IMPORT_FIELDS = {"name": "Nombre", "category": "Categoría", "price": "Precio de venta (IVA incluido)",
+                 "cost_price": "Costo", "stock_qty": "Existencias", "unit": "Unidad"}
+
+
+def _norm(v):
+    v = unicodedata.normalize("NFKD", str(v or "")).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", " ", v).strip()
+
+
+def _header_field(h):
+    """A qué campo corresponde un encabezado (tolera mayúsculas, tildes y variantes)."""
+    h = _norm(h)
+    if not h:
+        return None
+    if "costo" in h or "compra" in h:
+        return "cost_price"
+    if "precio" in h or "valor" in h or "pvp" in h or h == "venta":
+        return "price"
+    if any(w in h for w in ("existencia", "stock", "cantidad", "inventario", "unidades disponibles")):
+        return "stock_qty"
+    if any(w in h for w in ("categoria", "grupo", "familia", "linea")):
+        return "category"
+    if h in ("unidad", "unidad de medida", "medida", "um"):
+        return "unit"
+    if any(w in h for w in ("nombre", "producto", "articulo", "descripcion", "item", "referencia")):
+        return "name"
+    return None
+
+
+def _parse_amount(v):
+    """Números como los escribe la gente en Colombia: 25000, 25.000, $ 25.000, 1.234.567,50, 25,5…"""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    t = re.sub(r"[^0-9,.\-]", "", str(v))
+    if not t or t in "-.,":
+        return None
+    if "," in t and "." in t:
+        dec = "," if t.rfind(",") > t.rfind(".") else "."
+        t = t.replace("." if dec == "," else ",", "").replace(",", ".")
+    elif "." in t:
+        if re.fullmatch(r"-?\d{1,3}(\.\d{3})+", t):
+            t = t.replace(".", "")
+    elif "," in t:
+        t = t.replace(",", "") if re.fullmatch(r"-?\d{1,3}(,\d{3})+", t) else t.replace(",", ".")
+    try:
+        return float(t)
+    except ValueError:
+        raise ValueError(f'"{v}" no es un número')
+
+
+def _read_table(filename, data):
+    name = (filename or "").lower()
+    if name.endswith(".xls"):
+        raise ApiError('Ese es el formato viejo de Excel (.xls). En Excel usa "Guardar como" → "Libro de Excel (.xlsx)".')
+    if name.endswith((".xlsx", ".xlsm")):
+        try:
+            import openpyxl
+        except ImportError:
+            raise ApiError("El servidor no tiene instalado el lector de Excel (openpyxl). Mientras tanto, guarda el archivo como CSV.")
+        try:
+            wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        except Exception:
+            raise ApiError("No se pudo abrir el archivo de Excel. ¿Está dañado o protegido con contraseña?")
+        rows = [list(r) for r in wb.worksheets[0].iter_rows(values_only=True)]
+        wb.close()
+        return rows
+    if name.endswith((".csv", ".txt")):
+        for enc in ("utf-8-sig", "latin-1"):
+            try:
+                txt = data.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        try:
+            dialect = csv.Sniffer().sniff(txt[:5000], delimiters=";,\t")
+        except csv.Error:
+            dialect = csv.excel
+        return [r for r in csv.reader(io.StringIO(txt), dialect)]
+    raise ApiError("Sube un archivo de Excel (.xlsx) o CSV.")
+
+
+def _import_plan(conn, filename, data):
+    table = _read_table(filename, data)
+    header_idx, mapping = None, {}
+    for i, row in enumerate(table[:15]):
+        found = {}
+        for j, h in enumerate(row):
+            f = _header_field(h)
+            if f and f not in found:
+                found[f] = j
+        if "name" in found and len(found) >= 2:
+            header_idx, mapping = i, found
+            break
+    if header_idx is None:
+        raise ApiError("No se encontró la fila de encabezados. La primera fila debe tener al menos las columnas "
+                       "Nombre y Precio (descarga la plantilla para ver el formato).")
+    existing = {p["name"].strip().lower(): dict(p) for p in conn.execute("SELECT * FROM products").fetchall()}
+    rows, seen = [], set()
+    data_rows = table[header_idx + 1:]
+    if len(data_rows) > IMPORT_MAX_ROWS:
+        raise ApiError(f"El archivo tiene más de {IMPORT_MAX_ROWS} filas. Divídelo en varios archivos.")
+    for n, raw in enumerate(data_rows, start=header_idx + 2):
+        get = lambda f: raw[mapping[f]] if f in mapping and mapping[f] < len(raw) else None  # noqa: E731
+        name = str(get("name") or "").strip()
+        values = {f: get(f) for f in ("price", "cost_price", "stock_qty")}
+        if not name and all(v in (None, "") for v in values.values()):
+            continue  # fila vacía
+        entry = {"row": n, "name": name, "errors": [], "changes": []}
+        parsed = {}
+        for f, label in (("price", "precio"), ("cost_price", "costo"), ("stock_qty", "existencias")):
+            try:
+                v = _parse_amount(values[f])
+            except ValueError as e:
+                entry["errors"].append(f"{label}: {e}")
+                continue
+            if v is not None:
+                if v < 0:
+                    entry["errors"].append(f"{label} no puede ser negativo")
+                parsed[f] = v
+        for f in ("category", "unit"):
+            v = get(f)
+            if v not in (None, ""):
+                parsed[f] = str(v).strip()
+        key = name.lower()
+        if not name:
+            entry["errors"].append("falta el nombre")
+        elif key in seen:
+            entry["errors"].append("el producto está repetido en el archivo")
+        seen.add(key)
+        current = existing.get(key)
+        if current:
+            entry["action"], entry["id"] = "actualizar", current["id"]
+            if "price" in parsed and parsed["price"] <= 0:
+                entry["errors"].append("el precio debe ser mayor que cero")
+            labels = {"price": "precio", "cost_price": "costo", "stock_qty": "existencias", "category": "categoría", "unit": "unidad"}
+            for f, v in parsed.items():
+                old = current.get(f)
+                if (isinstance(v, float) and abs((old or 0) - v) > 1e-9) or (isinstance(v, str) and (old or "") != v):
+                    entry["changes"].append(f"{labels[f]}: {'—' if old in (None, '') else f'{old:g}'} → {v:g}" if isinstance(v, float)
+                                            else f'{labels[f]}: "{old or ""}" → "{v}"')
+            if not entry["changes"] and not entry["errors"]:
+                entry["action"] = "sin cambios"
+        else:
+            entry["action"] = "crear"
+            if not parsed.get("price") or parsed["price"] <= 0:
+                entry["errors"].append("los productos nuevos necesitan un precio mayor que cero")
+        entry["values"] = parsed
+        rows.append(entry)
+    count = lambda a: sum(1 for r in rows if r["action"] == a and not r["errors"])  # noqa: E731
+    return {
+        "columns": {f: IMPORT_FIELDS[f] for f in mapping},
+        "rows": rows,
+        "summary": {"crear": count("crear"), "actualizar": count("actualizar"), "sin_cambios": count("sin cambios"),
+                    "errores": sum(1 for r in rows if r["errors"])},
+    }
+
+
+@app.post("/api/products/import")
+@require_auth(admin=True)
+def import_products():
+    d = body()
+    try:
+        data = base64.b64decode(d.get("data_base64") or "", validate=True)
+    except Exception:
+        raise ApiError("El archivo no llegó bien. Intenta de nuevo.")
+    if not data:
+        raise ApiError("Elige un archivo.")
+    if len(data) > IMPORT_MAX_BYTES:
+        raise ApiError("El archivo pesa más de 5 MB.")
+    filename = text(d, "filename")
+    with get_conn() as conn:
+        plan = _import_plan(conn, filename, data)
+        if not d.get("apply"):
+            return jsonify(plan)
+        now = time.time()
+        created = updated = 0
+        for r in plan["rows"]:
+            if r["errors"] or r["action"] == "sin cambios":
+                continue
+            v = r["values"]
+            if r["action"] == "crear":
+                pid = str(uuid.uuid4())
+                conn.execute(
+                    """INSERT INTO products (id, name, price, unit, stock_qty, cost_price, category, created_at)
+                       VALUES (?,?,?,?,?,?,?,?)""",
+                    (pid, r["name"], v["price"], v.get("unit") or "unidad", v.get("stock_qty", 0),
+                     v.get("cost_price", 0), v.get("category", ""), now))
+                if v.get("stock_qty"):
+                    conn.execute("INSERT INTO stock_movements (product_id, change_qty, reason, reference, created_at) VALUES (?,?,?,?,?)",
+                                 (pid, v["stock_qty"], "importación", filename, now))
+                created += 1
+            else:
+                old = conn.execute("SELECT stock_qty FROM products WHERE id=?", (r["id"],)).fetchone()
+                sets = {f: v[f] for f in ("price", "cost_price", "stock_qty", "category", "unit") if f in v}
+                conn.execute(f"UPDATE products SET {', '.join(f'{f}=?' for f in sets)} WHERE id=?",
+                             list(sets.values()) + [r["id"]])
+                if "stock_qty" in sets and abs((old["stock_qty"] or 0) - sets["stock_qty"]) > 1e-9:
+                    conn.execute("INSERT INTO stock_movements (product_id, change_qty, reason, reference, created_at) VALUES (?,?,?,?,?)",
+                                 (r["id"], sets["stock_qty"] - (old["stock_qty"] or 0), "importación", filename, now))
+                log(conn, "producto", r["id"], f'Editó el producto "{r["name"]}" al importar "{filename}": ' + "; ".join(r["changes"]))
+                updated += 1
+        log(conn, "producto", None, f'Importó productos desde "{filename}": {created} creados, {updated} actualizados'
+            + (f', {plan["summary"]["errores"]} filas con errores no se importaron' if plan["summary"]["errores"] else ""))
+    return jsonify({"created": created, "updated": updated, "skipped": plan["summary"]["errores"]})
+
+
+@app.get("/api/products/import-template")
+@require_auth(admin=True)
+def import_template():
+    """Plantilla de Excel con los productos actuales: se puede editar y volver a subir para cambiar precios en bloque."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Productos"
+    headers = list(IMPORT_FIELDS.values())
+    ws.append(headers)
+    for c in ws[1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="16233A")
+    with get_conn() as conn:
+        products = conn.execute("SELECT * FROM products ORDER BY category COLLATE NOCASE, name COLLATE NOCASE").fetchall()
+    for p in products:
+        ws.append([p["name"], p["category"] or "", p["price"], p["cost_price"] or 0, p["stock_qty"] or 0, p["unit"] or "unidad"])
+    if not products:
+        ws.append(["Martillo de uña 16 oz", "Herramientas", 25000, 15000, 10, "unidad"])
+        ws.append(["Bombillo LED 9W", "Eléctricos", 8000, 4000, 50, "unidad"])
+    for col, width in zip("ABCDEF", (36, 18, 30, 14, 14, 12)):
+        ws.column_dimensions[col].width = width
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(buf, as_attachment=True, download_name="productos.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
 # ---------- facturas ----------
 INVOICE_SELECT = """
 SELECT i.*,
@@ -901,7 +1147,15 @@ def _with_totals(row):
     total = lo que vale la factura después de devoluciones; original_total = lo facturado."""
     inv = dict(row)
     inv["status"] = inv.get("status") or "activa"
-    inv["original_total"] = money(inv.pop("net") * (1 + (inv.get("tax_rate") or 0) / 100))
+    lines = inv.pop("net")  # suma de las líneas (cantidad × precio − descuento)
+    rate = (inv.get("tax_rate") or 0) / 100
+    if inv.get("tax_included"):
+        inv["original_total"] = money(lines)               # el precio ya trae el IVA
+        inv["subtotal"] = money(lines / (1 + rate))         # base sin IVA
+    else:
+        inv["original_total"] = money(lines * (1 + rate))  # facturas viejas: IVA sumado aparte
+        inv["subtotal"] = money(lines)
+    inv["tax_amount"] = money(inv["original_total"] - inv["subtotal"])
     inv["returned"] = money(inv["returned"])
     inv["total"] = money(inv["original_total"] - inv["returned"])
     inv["paid"] = money(inv["paid"])
@@ -981,6 +1235,8 @@ def create_invoice():
         raise ApiError("La factura necesita al menos un artículo.")
     if not text(client, "name"):
         raise ApiError("La factura necesita un cliente.")
+    if payment and payment.get("mode") == "credito" and not client.get("id"):
+        raise ApiError("Para vender a crédito elige un cliente registrado (no se le puede fiar a Consumidor final).")
 
     parsed = []
     for it in items:
@@ -1015,7 +1271,7 @@ def create_invoice():
 
                 net = sum(qty * (price if price is not None else products[pid]["price"]) * (1 - disc / 100)
                           for pid, qty, price, disc in parsed)
-                total = money(net * (1 + tax_rate / 100))
+                total = money(net)  # los precios ya incluyen el IVA
                 pay_amount, pay_method = 0.0, None
                 if payment is not None:
                     pay_method = parse_method(payment.get("method"))
@@ -1037,8 +1293,8 @@ def create_invoice():
                 conn.execute(
                     """INSERT INTO invoices (id, number, created_at, client_name, client_doc,
                        client_address, client_phone, client_email, tax_rate, notes, warranty, seller,
-                       status, user_id, user_name, payment_tracking, client_id)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'activa',?,?,?,?)""",
+                       status, user_id, user_name, payment_tracking, client_id, tax_included)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'activa',?,?,?,?,1)""",
                     (invoice_id, number, now, text(client, "name"), text(client, "doc"),
                      text(client, "address"), text(client, "phone"), text(client, "email"),
                      tax_rate, text(d, "notes"), text(d, "warranty"), text(d, "seller"),
@@ -1197,10 +1453,11 @@ def create_return(iid):
             available = it["qty"] - it["returned_qty"]
             if qty > available + 1e-9:
                 raise ApiError(f'De "{it["description"]}" solo se pueden devolver {available:g}.')
-            line_net = qty * it["price"] * (1 - (it["discount"] or 0) / 100)
-            lines.append((it, qty, money(line_net * (1 + tax))))
-            net += line_net
-            amount += line_net * (1 + tax)
+            line = qty * it["price"] * (1 - (it["discount"] or 0) / 100)
+            line_amount = line if inv.get("tax_included") else line * (1 + tax)  # lo que pagó el cliente
+            lines.append((it, qty, money(line_amount)))
+            net += line_amount / (1 + tax)  # base sin IVA
+            amount += line_amount
             cost += qty * (it.get("unit_cost") or 0)
         amount = money(amount)
         # Si el cliente ya pagó más de lo que vale la factura tras la devolución, se le devuelve la diferencia.
@@ -1659,7 +1916,8 @@ def dashboard():
     with get_conn() as conn:
         invoices = _invoice_rows(conn, f"WHERE i.created_at >= ? AND i.created_at < ? AND {active}", (start, end))
         items = conn.execute(
-            f"""SELECT it.*, COALESCE(it.unit_cost, p.cost_price, 0) AS cost FROM invoice_items it
+            f"""SELECT it.*, COALESCE(it.unit_cost, p.cost_price, 0) AS cost, i.tax_rate AS tax_rate,
+                      i.tax_included AS tax_included FROM invoice_items it
                JOIN invoices i ON i.id = it.invoice_id LEFT JOIN products p ON p.id = it.product_id
                WHERE i.created_at >= ? AND i.created_at < ? AND {active}""", (start, end)).fetchall()
         rets = conn.execute(
@@ -1681,8 +1939,13 @@ def dashboard():
         purchases = _purchase_rows(conn, "WHERE p.created_at >= ? AND p.created_at < ? AND p.status <> 'anulada'", (start, end))
         payables = [p for p in _purchase_rows(conn, "WHERE p.status <> 'anulada'") if p["balance"] > 0.004]
 
-    gross = sum(i["qty"] * i["price"] for i in items)
-    net = sum(i["qty"] * i["price"] * (1 - (i["discount"] or 0) / 100) for i in items)
+    def base(i, with_discount=True):
+        """Valor de la línea sin IVA (si el precio traía el IVA, se le quita)."""
+        v = i["qty"] * i["price"] * ((1 - (i["discount"] or 0) / 100) if with_discount else 1)
+        return v / (1 + (i["tax_rate"] or 0) / 100) if i["tax_included"] else v
+
+    gross = sum(base(i, with_discount=False) for i in items)
+    net = sum(base(i) for i in items)
     cost = sum(i["qty"] * (i["cost"] or 0) for i in items)
     total = sum(inv["original_total"] for inv in invoices)
     ret_total = sum(r["amount"] for r in rets)
@@ -1697,7 +1960,7 @@ def dashboard():
         key = i["product_id"] or i["description"]
         p = products.setdefault(key, {"name": i["description"], "qty": 0, "net": 0.0})
         p["qty"] += i["qty"]
-        p["net"] += i["qty"] * i["price"] * (1 - (i["discount"] or 0) / 100)
+        p["net"] += base(i)
     for r in ret_items:
         key = r["product_id"] or r["description"]
         if key in products:

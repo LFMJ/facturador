@@ -763,7 +763,7 @@ views.productos = async (view) => {
   const fields = [
     { name: "name", label: "Nombre", required: true },
     { name: "category", label: "Categoría", placeholder: "ej. Herramientas", list: "cat-list" },
-    { name: "price", label: `Precio de venta (${company.currency || "$"})`, type: "number", required: true,
+    { name: "price", label: `Precio de venta, con ${company.tax_label || "IVA"} incluido (${company.currency || "$"})`, type: "number", required: true,
       validate: (v) => v > 0 ? null : "El precio debe ser mayor que cero." },
     { name: "cost_price", label: "Precio de costo", type: "number", default: 0, help: "Se actualiza solo al registrar compras. Se usa para la ganancia.",
       validate: (v) => v === null || v >= 0 ? null : "El costo no puede ser negativo." },
@@ -774,7 +774,7 @@ views.productos = async (view) => {
       options: [{ value: "", label: "— sin proveedor —" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))] },
   ];
   view.innerHTML = `<h2>Productos</h2>${categoryDatalist("cat-list", cats)}
-    <div class="toolbar"><input type="search" placeholder="Buscar producto…">${admin ? `<button class="btn primary" id="add">+ Nuevo</button>` : ""}</div>
+    <div class="toolbar"><input type="search" placeholder="Buscar producto…">${admin ? `<button class="btn" id="import">Importar Excel</button><button class="btn primary" id="add">+ Nuevo</button>` : ""}</div>
     ${cats.length ? `<div class="chips" id="cats"><button class="chip" data-c="">Todas</button>${cats.map((c) =>
       `<button class="chip" data-c="${esc(c)}">${esc(c)}</button>`).join("")}<button class="chip" data-c="__none">Sin categoría</button></div>` : ""}
     <div class="card"><ul class="list" id="list"></ul></div>`;
@@ -796,7 +796,10 @@ views.productos = async (view) => {
     if (!data) return;
     await guarded(async () => { await api("POST", `api/products/${p.id}/restock`, data); toast("Stock actualizado."); go("productos"); });
   };
-  if (admin) $("#add", view).onclick = () => edit({ category: productCategory && productCategory !== "__none" ? productCategory : "" });
+  if (admin) {
+    $("#add", view).onclick = () => edit({ category: productCategory && productCategory !== "__none" ? productCategory : "" });
+    $("#import", view).onclick = importProductsDialog;
+  }
   let lastQ = "";
   const render = (q) => {
     lastQ = q;
@@ -825,6 +828,61 @@ views.productos = async (view) => {
   if (catsEl) catsEl.onclick = (ev) => { if (ev.target.dataset.c !== undefined) { productCategory = ev.target.dataset.c; render(lastQ); } };
   searchable(view, render);
 };
+
+// Importar productos desde Excel/CSV: primero una vista previa, luego se confirma.
+function importProductsDialog() {
+  showDialog(`<h2>Importar productos desde Excel</h2>
+    <p class="muted" style="margin-top:-8px">Sube un archivo <b>.xlsx</b> o <b>.csv</b> con las columnas <b>Nombre</b> y <b>Precio</b>
+      (y si quieres: Categoría, Costo, Existencias, Unidad). Si un producto ya existe (mismo nombre), se actualiza.
+      Antes de guardar verás qué va a cambiar.</p>
+    <div class="note">Consejo: descarga la plantilla, que ya trae tus productos actuales. Sirve también para cambiar muchos precios de una vez.</div>
+    <div class="toolbar"><button type="button" class="btn" id="tpl">Descargar plantilla</button>
+      <label class="btn primary"><input type="file" id="file" accept=".xlsx,.xlsm,.csv,.txt" class="hidden">Elegir archivo…</label></div>
+    <div id="imp-result"></div>
+    <div class="btns"><button class="btn" value="close">Cerrar</button><button type="button" class="btn primary hidden" id="apply"></button></div>`, (form, dlg) => {
+    let payload = null;
+    $("#tpl", form).onclick = () => guarded(() => downloadBlob("api/products/import-template", "productos.xlsx",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+    $("#file", form).onchange = (ev) => {
+      const file = ev.target.files[0];
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) return toast("El archivo pesa más de 5 MB.", true);
+      const out = $("#imp-result", form), apply = $("#apply", form);
+      out.innerHTML = `<p class="muted">Revisando ${esc(file.name)}…</p>`; apply.classList.add("hidden");
+      const reader = new FileReader();
+      reader.onload = async () => {
+        payload = { filename: file.name, data_base64: reader.result.split(",")[1] };
+        try {
+          const plan = await api("POST", "api/products/import", payload);
+          const s = plan.summary, bad = plan.rows.filter((r) => r.errors.length), todo = s.crear + s.actualizar;
+          const rowsHtml = plan.rows.filter((r) => r.errors.length || r.action !== "sin cambios").slice(0, 300).map((r) => `<tr>
+            <td>${r.row}</td><td>${esc(r.name || "—")}</td>
+            <td>${r.errors.length ? `<span class="badge anulada">No se importa</span><div class="neg" style="font-size:.8rem">${esc(r.errors.join("; "))}</div>`
+              : r.action === "crear" ? `<span class="badge pagada">Nuevo</span>` : `<span class="badge abono">Actualizar</span><div class="muted" style="font-size:.8rem">${esc(r.changes.join("; "))}</div>`}</td></tr>`).join("");
+          out.innerHTML = `<p class="muted">Columnas reconocidas: ${esc(Object.values(plan.columns).join(", "))}</p>
+            <div class="tiles"><div class="tile"><div class="k">Nuevos</div><div class="v">${s.crear}</div></div>
+              <div class="tile"><div class="k">A actualizar</div><div class="v">${s.actualizar}</div></div>
+              <div class="tile"><div class="k">Sin cambios</div><div class="v">${s.sin_cambios}</div></div>
+              <div class="tile"><div class="k">Con errores</div><div class="v ${s.errores ? "neg" : ""}">${s.errores}</div></div></div>
+            ${bad.length ? `<div class="errors">Las filas con errores no se importan. Corrígelas en el archivo y vuelve a subirlo si las necesitas.</div>` : ""}
+            ${rowsHtml ? `<div style="max-height:40vh;overflow:auto"><table class="t"><thead><tr><th>Fila</th><th>Producto</th><th>Qué pasa</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>` : ""}`;
+          apply.textContent = `Importar ${todo} producto${todo === 1 ? "" : "s"}`;
+          apply.classList.toggle("hidden", !todo);
+        } catch (e) { out.innerHTML = `<div class="errors">${esc(e.message)}</div>`; }
+        ev.target.value = "";
+      };
+      reader.readAsDataURL(file);
+    };
+    $("#apply", form).onclick = async (ev) => {
+      ev.target.disabled = true;
+      try {
+        const r = await api("POST", "api/products/import", { ...payload, apply: true });
+        toast(`Listo: ${r.created} productos nuevos y ${r.updated} actualizados.`);
+        dlg.close(); go("productos");
+      } catch (e) { toast(e.message, true); ev.target.disabled = false; }
+    };
+  });
+}
 
 // Selector de producto agrupado por categoría (para facturas y compras).
 function productSelectOptions(products, sel, { disableEmpty = false } = {}) {
@@ -1340,7 +1398,7 @@ function returnDialog(inv) {
       <table class="t"><thead><tr><th>Artículo</th><th class="r">Puede devolver</th><th class="r" style="width:30%">Devuelve</th></tr></thead><tbody>
         ${avail.map((it) => `<tr><td>${esc(it.description)}</td><td class="r">${fmtNum(it.qty - it.returned_qty)}</td>
           <td class="r"><input type="number" step="any" min="0" inputmode="decimal" data-item="${it.id}" data-max="${it.qty - it.returned_qty}"
-            data-unit="${it.price * (1 - (it.discount || 0) / 100) * (1 + (inv.tax_rate || 0) / 100)}" placeholder="0" style="text-align:right"></td></tr>`).join("")}</tbody></table>
+            data-unit="${it.price * (1 - (it.discount || 0) / 100) * (inv.tax_included ? 1 : 1 + (inv.tax_rate || 0) / 100)}" placeholder="0" style="text-align:right"></td></tr>`).join("")}</tbody></table>
       <div class="totals"><div class="grand"><span>Valor devuelto</span><span class="money" id="ret-total">${esc(money(0))}</span></div></div>
       <p class="muted" id="refund-note"></p>
       <label class="f"><span>Motivo *</span><input name="reason" placeholder="ej. producto defectuoso"></label>
@@ -1394,6 +1452,7 @@ async function invoiceDetail(id) {
     <div class="totals">${inv.returned ? `<div><span>Facturado</span><span class="money">${esc(money(inv.original_total))}</span></div>
       <div><span>Devoluciones</span><span class="money">− ${esc(money(inv.returned))}</span></div>` : ""}
       <div><span>Total</span><span class="money">${esc(money(inv.total))}</span></div>
+      ${inv.tax_amount > 0 ? `<div class="muted"><span>${esc(company.tax_label || "IVA")} (${fmtNum(inv.tax_rate)}%) ${inv.tax_included ? "incluido" : "sumado"}</span><span class="money">${esc(money(inv.tax_amount))}</span></div>` : ""}
       <div><span>Pagado</span><span class="money">${esc(money(inv.paid))}</span></div>
       ${inv.payment_tracking ? `<div class="grand"><span>Saldo</span><span class="money">${esc(money(inv.balance))}</span></div>` : ""}</div>
     ${inv.returns.length ? `<h3>Devoluciones</h3><table class="t"><tbody>${inv.returns.map((r) => `<tr><td>${esc(fmtDateTime(r.created_at))}
@@ -1492,7 +1551,9 @@ function invoiceCreatedDialog(inv) {
 // ---------- nueva factura ----------
 views.factura = async (view) => {
   const [clients, products] = await Promise.all([api("GET", "api/clients"), api("GET", "api/products"), loadCompany()]);
-  const state = { clientId: "", lines: [] };
+  // Venta rápida de mostrador: sin crear cliente (NIT genérico de consumidor final en Colombia).
+  const CONSUMIDOR_FINAL = { name: "Consumidor final", doc: "222222222222" };
+  const state = { clientId: "__cf", lines: [] };
   const productById = Object.fromEntries(products.map((p) => [p.id, p]));
   const taxLabel = company.tax_label || "Impuesto";
 
@@ -1517,10 +1578,10 @@ views.factura = async (view) => {
         <label class="f"><span>Garantía (opcional)</span><input id="warranty" placeholder="ej. 6 meses por defectos de fábrica"></label>
       </div>
       <div class="totals">
-        <div><span>Subtotal</span><span class="money" id="t-gross"></span></div>
-        <div><span>Descuento</span><span class="money" id="t-disc"></span></div>
-        <div><span>${esc(taxLabel)}</span><span class="money" id="t-tax"></span></div>
-        <div class="grand"><span>Total</span><span class="money" id="t-total"></span></div>
+        <div id="row-disc" class="hidden"><span>Descuentos</span><span class="money" id="t-disc"></span></div>
+        <div><span>Subtotal (sin ${esc(taxLabel)})</span><span class="money" id="t-base"></span></div>
+        <div><span id="t-tax-label">${esc(taxLabel)} incluido</span><span class="money" id="t-tax"></span></div>
+        <div class="grand"><span>Total a pagar</span><span class="money" id="t-total"></span></div>
       </div>
       <div class="muted" style="margin-bottom:6px">Forma de pago</div>
       <div class="seg"><label><input type="radio" name="paymode" value="contado" checked>Pagada ahora</label>
@@ -1539,9 +1600,14 @@ views.factura = async (view) => {
   });
 
   const renderClients = () => {
-    $("#client", view).innerHTML = `<option value="">— elegir cliente —</option>` + clients.map((c) =>
-      `<option value="${esc(c.id)}" ${c.id === state.clientId ? "selected" : ""}>${esc(c.name)}${c.doc ? " — " + esc(c.doc) : ""}</option>`).join("");
+    $("#client", view).innerHTML = `<option value="__cf" ${state.clientId === "__cf" ? "selected" : ""}>Consumidor final (venta rápida, sin datos)</option>
+      <optgroup label="Clientes registrados">` + clients.map((c) =>
+      `<option value="${esc(c.id)}" ${c.id === state.clientId ? "selected" : ""}>${esc(c.name)}${c.doc ? " — " + esc(c.doc) : ""}</option>`).join("") + `</optgroup>`;
     const c = clients.find((x) => x.id === state.clientId);
+    if (state.clientId === "__cf") {
+      $("#client-info", view).textContent = "Venta de mostrador: no se guardan datos del cliente. Para vender a crédito elige un cliente registrado.";
+      return;
+    }
     $("#client-info", view).innerHTML = c
       ? esc([c.doc, c.address, [c.phone, c.email].filter(Boolean).join(" · ")].filter(Boolean).join("\n"))
         + (c.balance > 0 ? `\n<span class="badge pendiente">Ya debe ${esc(money(c.balance))}</span>` : "") : "";
@@ -1573,12 +1639,16 @@ views.factura = async (view) => {
       const el = $(`.line-item[data-i="${i}"] [data-total]`, view);
       if (el) el.textContent = money(q * p * (1 - d / 100));
     });
-    const net = gross - disc, tax = net * (num($("#tax", view).value) || 0) / 100;
-    currentTotal = Math.round((net + tax) * 100) / 100;
-    $("#t-gross", view).textContent = money(gross);
-    $("#t-disc", view).textContent = disc ? "- " + money(disc) : money(0);
-    $("#t-tax", view).textContent = money(tax);
-    $("#t-total", view).textContent = money(net + tax);
+    // Los precios ya traen el IVA: el total es la suma de las líneas y el IVA se desglosa de ahí.
+    const rate = num($("#tax", view).value) || 0;
+    const total = gross - disc, base = total / (1 + rate / 100);
+    currentTotal = Math.round(total * 100) / 100;
+    $("#row-disc", view).classList.toggle("hidden", !disc);
+    $("#t-disc", view).textContent = "- " + money(disc);
+    $("#t-base", view).textContent = money(base);
+    $("#t-tax-label", view).textContent = `${taxLabel} (${fmtNum(rate)}%) incluido`;
+    $("#t-tax", view).textContent = money(total - base);
+    $("#t-total", view).textContent = money(total);
   };
 
   const addLine = () => { state.lines.push({ productId: "", qty: "1", price: "", discount: "0" }); renderLines(); };
@@ -1605,8 +1675,9 @@ views.factura = async (view) => {
 
   $("#generate", view).onclick = async (ev) => {
     const errors = [];
-    const client = clients.find((c) => c.id === state.clientId);
+    const client = state.clientId === "__cf" ? CONSUMIDOR_FINAL : clients.find((c) => c.id === state.clientId);
     if (!client) errors.push("Falta el cliente: selecciónalo de la lista o crea uno nuevo.");
+    if (state.clientId === "__cf" && payMode() === "credito") errors.push("Para vender a crédito elige un cliente registrado: a Consumidor final no se le puede fiar.");
     const active = state.lines.filter((l) => l.productId);
     if (!active.length) errors.push("Añade al menos un artículo desde el catálogo.");
     const items = [];

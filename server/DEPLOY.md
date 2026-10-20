@@ -34,7 +34,7 @@ para que nunca termine en GitHub.
 ## 4. Instalar dependencias
 En el panel, abre una **"Bash console"** (pestaña "Consoles") y ejecuta:
 ```bash
-pip install --user flask reportlab pillow
+pip install --user flask reportlab pillow openpyxl
 ```
 (Normalmente ya vienen instaladas en PythonAnywhere; si dice
 "Requirement already satisfied", está bien.)

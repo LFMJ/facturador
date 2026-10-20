@@ -47,7 +47,17 @@ su código está en el historial de git (commit `abf58e9`) por si se vuelve a in
 - `invoice_items.unit_cost` guarda el costo al vender (para la ganancia). Costo y ganancia solo los ve el admin.
 - **Cierre de caja**: esperado por método = cobros − dinero devuelto a clientes − pagos a proveedores + dinero
   devuelto por proveedores − gastos (+ base en efectivo), filtrado por `user_id`. Un cierre por día y por persona (o "todos"). El vendedor solo ve su caja.
-- Descuento por línea en %, antes del impuesto. Numeración `FAC-0001` y `COM-0001` en `company`.
+- **El precio de los productos YA INCLUYE el IVA.** Total de la factura = suma de las líneas (cantidad × precio
+  − descuento); el IVA se **desglosa** de ahí (subtotal = total / (1 + tarifa)), nunca se suma encima.
+  `invoices.tax_included = 1` en las facturas nuevas; las anteriores a esta regla tienen 0 (el IVA se sumaba
+  aparte) y conservan su total. `_with_totals` devuelve `subtotal`, `tax_amount` y `total` según esa marca;
+  devoluciones, resumen y PDF también la respetan.
+- Descuento por línea en %. Numeración `FAC-0001` y `COM-0001` en `company`.
+- **Consumidor final**: venta de mostrador sin cliente registrado (`client_id` NULL, documento 222222222222).
+  No se permite vender a crédito sin un cliente registrado.
+- **Importar productos** (`/api/products/import`, xlsx con openpyxl o CSV): primero vista previa, luego
+  `apply`. Se empareja por nombre (sin distinguir mayúsculas): existe → se actualiza, no existe → se crea.
+  Las filas con errores no se importan. `/api/products/import-template` descarga los productos actuales.
 - Columnas nuevas se agregan a `MIGRATIONS` en `server/app.py` (ALTER TABLE idempotente) para no romper la
   base desplegada. No cambies el esquema sin añadir su migración.
 

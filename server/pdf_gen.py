@@ -188,20 +188,28 @@ def generate_invoice_pdf(invoice: dict, company: dict, output_path: str):
     story.append(Spacer(1, 10))
 
     # --- Totales ---
-    net = gross - discount_total
+    lines_total = gross - discount_total
     tax_rate = float(invoice.get("tax_rate") or 0)
-    tax_amount = net * (tax_rate / 100)
-    total = net + tax_amount
+    if invoice.get("tax_included"):
+        # el precio de cada artículo ya trae el IVA: se desglosa, no se suma
+        total = lines_total
+        subtotal = lines_total / (1 + tax_rate / 100)
+    else:
+        # facturas anteriores: el IVA se sumaba aparte
+        subtotal = lines_total
+        total = lines_total * (1 + tax_rate / 100)
+    tax_amount = total - subtotal
     tax_label = _t(company.get("tax_label") or "Impuesto")
     currency = _t(currency)
 
     totals_rows = []
     if discount_total > 0:
-        totals_rows.append([Paragraph("Subtotal", style_td), Paragraph(fmt_money(gross, currency), style_td_r)])
+        totals_rows.append([Paragraph("Valor sin descuento", style_td), Paragraph(fmt_money(gross, currency), style_td_r)])
         totals_rows.append([Paragraph("Descuento", style_td), Paragraph(f"- {fmt_money(discount_total, currency)}", style_td_r)])
-    else:
-        totals_rows.append([Paragraph("Subtotal", style_td), Paragraph(fmt_money(net, currency), style_td_r)])
-    totals_rows.append([Paragraph(f"{tax_label} ({tax_rate:g}%)", style_td), Paragraph(fmt_money(tax_amount, currency), style_td_r)])
+    totals_rows.append([Paragraph("Subtotal (sin IVA)" if invoice.get("tax_included") else "Subtotal", style_td),
+                        Paragraph(fmt_money(subtotal, currency), style_td_r)])
+    tax_text = f"{tax_label} ({tax_rate:g}%)" + (" incluido" if invoice.get("tax_included") else "")
+    totals_rows.append([Paragraph(tax_text, style_td), Paragraph(fmt_money(tax_amount, currency), style_td_r)])
     totals_rows.append([
         Paragraph("<b>Total</b>", ParagraphStyle("totlbl", fontName="Times-Bold", fontSize=12, textColor=INK)),
         Paragraph(f"<b>{fmt_money(total, currency)}</b>", ParagraphStyle("totval", fontName="Times-Bold", fontSize=12, textColor=INK, alignment=TA_RIGHT)),
@@ -215,7 +223,7 @@ def generate_invoice_pdf(invoice: dict, company: dict, output_path: str):
                       ParagraphStyle("totval2", fontName="Times-Bold", fontSize=12, textColor=INK, alignment=TA_RIGHT)),
         ])
         total -= returned
-    totals_table = Table(totals_rows, colWidths=[35 * mm, 35 * mm], hAlign="RIGHT")
+    totals_table = Table(totals_rows, colWidths=[42 * mm, 35 * mm], hAlign="RIGHT")
     last_row = len(totals_rows) - 1
     totals_table.setStyle(TableStyle([
         ("TOPPADDING", (0, 0), (-1, -1), 4),
