@@ -9,8 +9,8 @@ con internet.
 
 **Versión web:** el mismo servidor también sirve una versión web, así que
 cualquiera puede trabajar desde el **celular** o desde cualquier navegador
-entrando a `https://tuusuario.pythonanywhere.com` con la clave de API, sin
-instalar nada. App de escritorio y versión web comparten los mismos datos.
+entrando a `https://tuusuario.pythonanywhere.com` con su usuario y
+contraseña, sin instalar nada. App de escritorio y versión web comparten los mismos datos.
 
 ## 1. Desplegar el servidor (una sola vez, gratis)
 
@@ -28,10 +28,10 @@ pip install -r requirements.txt
 python main.py
 ```
 
-La primera vez, pide la URL del servidor y la clave de API, prueba la
-conexión y guarda esos datos localmente (`~/.facturador/config.json`). Si
-más adelante necesitas apuntar a otro servidor, usa el botón
-**"⚙ Cambiar servidor"** en la barra lateral, sin salir de la app.
+La primera vez, pide la URL del servidor, tu usuario y tu contraseña, y
+guarda la sesión en ese equipo (`~/.facturador/config.json`, sin guardar la
+contraseña). Para entrar con otro usuario o a otro servidor usa
+**"⚙ Cambiar servidor o usuario"** en la barra lateral.
 
 ## 3. Empaquetar como ejecutable (.exe / .app) — opcional
 
@@ -63,7 +63,9 @@ Resultado en `dist/Facturador.app`.
 ```
 facturador_app/
   main.py            punto de entrada + asistente de conexión al servidor
-  app.py              ventana principal, navegación, cambiar servidor
+  app.py              ventana principal, pestañas según el rol, cerrar sesión
+  login.py            formulario de acceso (usuario/contraseña o clave maestra)
+  tab_resumen.py       pestaña "Resumen" (solo administrador)
   db.py                cliente HTTP hacia el servidor (antes hablaba con SQLite local)
   pdf_gen.py           generación del PDF de la factura (reportlab)
   config.py            URL/clave del servidor guardadas localmente por equipo
@@ -85,8 +87,11 @@ facturador_app/
 - **"No se pudo conectar con el servidor"**: revisa que la URL sea correcta
   (con `https://`, sin `/` al final) y que tengas internet. Prueba abrir
   la URL + `/api/ping` en el navegador.
-- **"La clave de API no es correcta"**: revísala en "⚙ Cambiar servidor";
-  debe ser exactamente igual a la que pusiste en `server/app.py`.
+- **"Usuario o contraseña incorrectos"**: revísalos; tras 5 intentos fallidos
+  el usuario se bloquea 5 minutos. Un administrador puede cambiarle la
+  contraseña en la pestaña **Usuarios** de la versión web.
+- **"Tu sesión terminó"**: el administrador te desactivó o cambió tu contraseña,
+  o pasaron 30 días sin usar la app. Vuelve a entrar.
 - **"El servidor no respondió a tiempo"**: si acabas de desplegar o hace
   mucho que nadie lo usa, puede tardar unos segundos en la primera
   petición. Intenta de nuevo.
@@ -99,7 +104,7 @@ facturador_app/
 - **Nueva factura**: los artículos se eligen SIEMPRE desde el catálogo (no
   texto libre), para poder descontar el inventario automáticamente al
   facturar. Si no hay suficiente stock, la factura no se genera y te dice
-  cuánto hay disponible. Al eliminar una factura, el stock se restaura.
+  cuánto hay disponible. Al anular una factura, el stock se restaura.
 - **Descuento por línea**: cada artículo de la factura admite un % de
   descuento independiente, editable en el momento (no es una tarifa fija).
 - **Garantía** y **Vendedor**: dos campos nuevos al generar la factura,
@@ -121,3 +126,22 @@ columnas nuevas sin borrar clientes, productos ni facturas que ya tenías).
 - Para actualizar un servidor ya desplegado: sube `server/app.py`,
   `server/static/` y `pdf_gen.py` (ver `server/DEPLOY.md`, paso 2) y dale
   "Reload". No hay cambios en la base de datos.
+
+## 9. Usuarios, pagos, anulación, resumen y copias de seguridad
+
+- **Usuarios y roles:** cada empleado entra con su usuario. El *vendedor*
+  factura, cobra y consulta; el *administrador* además ve el resumen, anula
+  facturas, maneja productos, proveedores, empresa, usuarios y copias. Cada
+  factura y cada pago guardan quién los hizo. La clave de API pasa a ser la
+  **clave maestra** del dueño (ver `server/DEPLOY.md`, paso 8).
+- **Estado de pago:** al facturar se elige "Pagada ahora" o "A crédito" (con
+  abono inicial opcional) y el método (efectivo, transferencia, tarjeta, otro).
+  En Historial se registran los abonos y se filtra "Por cobrar".
+- **Anular en vez de eliminar:** la factura queda en el historial con sello
+  ANULADA en el PDF, motivo y quién la anuló; el stock vuelve al inventario y
+  la numeración no tiene huecos.
+- **Resumen de ventas** (administrador): ventas, ganancia estimada (usa el
+  precio de costo guardado en cada venta), cobrado por método, cuentas por
+  cobrar, productos más vendidos y ventas por vendedor; en la web con gráfica.
+- **Copias de seguridad:** automáticas diarias en el servidor y descarga manual
+  desde Mi empresa. Cómo restaurar: `server/DEPLOY.md`, paso 11.

@@ -19,6 +19,22 @@ INK = colors.HexColor("#16233A")
 INK_SOFT = colors.HexColor("#3C4A5E")
 BRASS = colors.HexColor("#7C5F2C")
 LINE = colors.HexColor("#E1DFD8")
+VOID_RED = colors.HexColor("#A23B3B")
+
+PAYMENT_LABELS = {"efectivo": "Efectivo", "transferencia": "Transferencia", "tarjeta": "Tarjeta", "otro": "Otro"}
+
+
+def _void_stamp(canvas, doc):
+    """Sello diagonal "ANULADA" sobre toda la página."""
+    canvas.saveState()
+    canvas.setFillColor(VOID_RED)
+    canvas.setFillAlpha(0.18)
+    canvas.setFont("Helvetica-Bold", 96)
+    w, h = doc.pagesize
+    canvas.translate(w / 2, h / 2)
+    canvas.rotate(35)
+    canvas.drawCentredString(0, -30, "ANULADA")
+    canvas.restoreState()
 
 
 def _t(value) -> str:
@@ -200,6 +216,27 @@ def generate_invoice_pdf(invoice: dict, company: dict, output_path: str):
     ]))
     story.append(totals_table)
 
+    # --- estado de pago (solo si la factura lleva registro de pagos) ---
+    if invoice.get("payment_tracking") and invoice.get("status") != "anulada":
+        paid = sum(float(p.get("amount") or 0) for p in invoice.get("payments") or [])
+        balance = round(total - paid, 2)
+        methods = sorted({PAYMENT_LABELS.get(p.get("method"), p.get("method") or "") for p in invoice.get("payments") or []})
+        if balance <= 0.004:
+            text = "PAGADA" + (f" · {', '.join(methods)}" if methods else "")
+        else:
+            text = (f"Abonado: {_t(fmt_money(paid, company.get('currency') or '$'))} · "
+                    f"<b>Saldo pendiente: {_t(fmt_money(balance, company.get('currency') or '$'))}</b>")
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(text, ParagraphStyle("paystate", parent=style_co_meta, alignment=TA_RIGHT)))
+
+    if invoice.get("status") == "anulada":
+        story.append(Spacer(1, 14))
+        story.append(Paragraph("FACTURA ANULADA", ParagraphStyle("void_lbl", parent=style_label, textColor=VOID_RED)))
+        when = format_date_es(invoice["voided_at"]) if invoice.get("voided_at") else ""
+        detail = " · ".join(x for x in [when, f"por {invoice['voided_by']}" if invoice.get("voided_by") else "",
+                                         invoice.get("void_reason") or ""] if x)
+        story.append(Paragraph(_t(detail), style_footer))
+
     if invoice.get("warranty"):
         story.append(Spacer(1, 16))
         story.append(Paragraph("GARANTÍA", style_label))
@@ -216,4 +253,7 @@ def generate_invoice_pdf(invoice: dict, company: dict, output_path: str):
         if footer_note:
             story.append(Paragraph(_t(footer_note), style_footer))
 
-    doc.build(story)
+    if invoice.get("status") == "anulada":
+        doc.build(story, onFirstPage=_void_stamp, onLaterPages=_void_stamp)
+    else:
+        doc.build(story)

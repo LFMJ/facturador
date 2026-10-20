@@ -5,7 +5,7 @@ import customtkinter as ctk
 from PIL import Image as PILImage
 
 import db
-from theme import (INK, INK_SOFT, BRASS, LINE, FONT_HEAD, FONT_BODY, FONT_BODY_SM,
+from theme import (INK, INK_SOFT, BRASS, LINE, FONT_HEAD, FONT_HEAD_SM, FONT_BODY, FONT_BODY_SM,
                     labeled_entry, show_error_border, is_valid_email)
 
 MAX_LOGO_DIM = 500  # px — un logo no necesita más resolución que esta para una factura
@@ -78,6 +78,19 @@ class EmpresaTab(ctk.CTkFrame):
 
         ctk.CTkButton(inner, text="Guardar información", command=self._save,
                        fg_color=INK, hover_color="#233650", height=38).pack(anchor="w", pady=(18, 0))
+
+        # --- copia de seguridad ---
+        bcard = ctk.CTkFrame(self, fg_color="white", border_width=1, border_color=LINE, corner_radius=8)
+        bcard.pack(fill="x", pady=(14, 0))
+        binner = ctk.CTkFrame(bcard, fg_color="transparent")
+        binner.pack(fill="x", padx=22, pady=16)
+        ctk.CTkLabel(binner, text="Copia de seguridad", font=FONT_HEAD_SM, text_color=INK, anchor="w").pack(fill="x")
+        ctk.CTkLabel(binner, anchor="w", justify="left", wraplength=700, font=FONT_BODY_SM, text_color=INK_SOFT,
+                     text=("El servidor guarda una copia automática cada día. Además, descarga una copia a este "
+                           "computador (o a Google Drive) de vez en cuando: si algo le pasa al servidor, con ese "
+                           "archivo se recupera todo.")).pack(fill="x", pady=(2, 8))
+        ctk.CTkButton(binner, text="Descargar copia ahora", command=self._download_backup,
+                      fg_color=BRASS, hover_color="#7C5F2C", text_color="#211804").pack(anchor="w")
 
     # ---------- data ----------
     def refresh(self):
@@ -156,6 +169,22 @@ class EmpresaTab(ctk.CTkFrame):
             self.app.show_toast("Logo guardado.")
         except db.DBError as e:
             self.err_logo.configure(text=f"El logo se procesó pero no se pudo guardar: {e}")
+
+    def _download_backup(self):
+        import datetime
+        out = filedialog.asksaveasfilename(
+            title="Guardar copia de seguridad", defaultextension=".db",
+            initialfile=f"facturador-copia-{datetime.date.today():%Y-%m-%d}.db",
+            filetypes=[("Copia de Facturador", "*.db")])
+        if not out:
+            return
+        try:
+            data = db.download_backup(self.app.server)
+            with open(out, "wb") as f:
+                f.write(data)
+            self.app.show_toast("Copia de seguridad guardada.")
+        except (db.DBError, OSError) as e:
+            messagebox.showerror("No se pudo descargar la copia", str(e))
 
     # ---------- validation + save ----------
     def _save(self):

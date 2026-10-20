@@ -32,15 +32,15 @@ Debe quedar así:
     icon.svg
 ```
 
-## 3. Cambiar la clave de API
+## 3. Poner tu clave maestra
 Abre `app.py` (puedes editarlo directo en el navegador de PythonAnywhere) y
 cambia esta línea por una clave secreta tuya:
 ```python
 API_KEY = os.environ.get("FACTURADOR_API_KEY", "cambia-esta-clave")
 ```
-Reemplaza `"cambia-esta-clave"` por algo largo y difícil de adivinar. Esta
-es la clave que vas a compartir con tus empleados (junto con la URL) para
-que sus apps de escritorio se conecten.
+Reemplaza `"cambia-esta-clave"` por algo largo y difícil de adivinar. Esta es
+la **clave maestra**: da acceso total y es **solo para ti** (el dueño). No se
+la des a los empleados: cada uno tendrá su propio usuario (paso 8).
 
 ## 4. Instalar dependencias
 En el panel, abre una **"Bash console"** (pestaña "Consoles") y ejecuta:
@@ -81,33 +81,74 @@ Abre en el navegador:
 ```
 https://tuusuario.pythonanywhere.com/api/ping
 ```
-Debería mostrar algo como `{"error":"Clave de API incorrecta o ausente."}`
-— eso es correcto, significa que el servidor está vivo (solo falta la clave,
-que la app de escritorio sí va a enviar).
+Debería mostrar algo como `{"error":"Sesión vencida o datos de acceso incorrectos..."}`
+— eso es correcto, significa que el servidor está vivo.
 
-## 8. Usar la versión web (celular, tablet o cualquier computador)
-Abre en el navegador:
-```
-https://tuusuario.pythonanywhere.com
-```
-Ingresa la clave de API del paso 3 y listo: puedes hacer facturas,
-descargar/compartir el PDF (por WhatsApp, correo…), y manejar clientes,
-productos, proveedores y los datos de la empresa. Todo queda en el mismo
-servidor que usa la app de escritorio.
+## 8. Crear los usuarios (una sola vez)
+1. Abre `https://tuusuario.pythonanywhere.com` en el navegador.
+2. Toca **"Entrar con la clave maestra (dueño)"** y escribe la clave del paso 3.
+3. Ve a la pestaña **Usuarios** y crea:
+   - **tu propio usuario administrador** (para el día a día, en vez de la clave maestra);
+   - un usuario **vendedor** para cada empleado.
+4. Toca **Salir** y entra con tu usuario nuevo.
+
+Roles:
+- **Vendedor:** hace facturas, registra pagos, ve el historial, consulta
+  productos y crea/edita clientes.
+- **Administrador:** todo lo anterior, más Resumen de ventas (con ganancias),
+  anular facturas, productos, proveedores, datos de la empresa, copias de
+  seguridad y usuarios.
+
+Si alguien deja la empresa o pierde el celular: en **Usuarios → Editar**,
+desmarca "Usuario activo" (o cámbiale la contraseña). Su sesión se cierra en
+todos sus dispositivos al instante, sin afectar a los demás.
+
+## 9. Usar la versión web (celular, tablet o cualquier computador)
+Cada persona abre `https://tuusuario.pythonanywhere.com` y entra con su
+usuario y contraseña. El navegador recuerda la sesión hasta que toque **"Salir"**
+(o 30 días sin usarla).
 
 **Instalarla como app en el celular** (opcional): en Android/Chrome, menú
 ⋮ → "Agregar a la pantalla principal"; en iPhone/Safari, botón Compartir →
 "Agregar a inicio". Queda un ícono como si fuera una app.
 
-El navegador recuerda la clave hasta que toques **"Salir"**. Si un celular
-se pierde o alguien deja la empresa, cambia la clave (paso 3) y dale
-"Reload": todos tendrán que entrar de nuevo con la clave nueva.
+## 10. Configurar la app de escritorio
+En cada equipo, al abrir la app escribe la **URL del servidor**
+(`https://tuusuario.pythonanywhere.com`), tu **usuario** y tu **contraseña**.
+La app recuerda la sesión en ese equipo hasta que toques "Cerrar sesión".
 
-## 9. Configurar la app de escritorio
-En cada equipo, al abrir la app por primera vez (o desde "⚙ Cambiar
-servidor"), ingresa:
-- **URL del servidor:** `https://tuusuario.pythonanywhere.com`
-- **Clave de API:** la que pusiste en el paso 3
+## 11. Copias de seguridad
+- **Automáticas:** el servidor guarda una copia por día en la carpeta
+  `backups/` (junto a `app.py`) y conserva las últimas 14.
+- **Manuales (recomendado una vez por semana):** en **Mi empresa → Copias de
+  seguridad → "Descargar copia ahora"** (web o escritorio). Guarda ese archivo
+  `.db` en tu computador o en Google Drive: las copias automáticas viven en el
+  mismo servidor, así que no sirven si pierdes la cuenta de PythonAnywhere.
+
+**Restaurar una copia** (solo si se dañó o se borró la información):
+1. En PythonAnywhere, pestaña **"Web"**, toca **"Disable"** (apaga la app).
+2. En **"Files"**, entra a la carpeta del servidor, renombra
+   `facturador_server.db` a `facturador_server-danado.db` (por si acaso).
+3. Sube tu copia (`facturador-copia-....db` o una de `backups/`) y renómbrala
+   a `facturador_server.db`.
+4. En **"Web"**, toca **"Enable"** y luego **"Reload"**.
+
+## Si ya tenías el servidor funcionando (actualizar)
+Sube los archivos nuevos (`app.py`, `pdf_gen.py` y la carpeta `static/`)
+reemplazando los viejos y dale **"Reload"**. **No se borra nada**: la base de
+datos se actualiza sola la primera vez (agrega las columnas y tablas nuevas).
+Después sigue el paso 8 para crear los usuarios.
+
+- Las facturas que ya existían quedan como **"Sin registro de pago"** (no se
+  marcan como pagadas ni como pendientes porque no se sabe). Si quieres, desde
+  Historial → Detalle puedes registrarles el pago.
+- La clave que usaban todos pasa a ser la **clave maestra**. Cuando cada
+  empleado tenga su usuario, **cámbiala** (paso 3) para que nadie más la use.
+- Las apps de escritorio viejas siguen funcionando con esa clave hasta que la
+  cambies; actualízalas a la nueva versión para que pidan usuario y contraseña.
+- Las facturas ya no se eliminan: se **anulan** (quedan en el historial con un
+  sello de ANULADA y el stock vuelve al inventario), para no dejar huecos en
+  la numeración.
 
 ## Límites del plan gratuito a tener en cuenta
 - Espacio en disco limitado (~512 MB) — más que suficiente para años de

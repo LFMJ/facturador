@@ -5,7 +5,8 @@ Mantiene exactamente las mismas funciones y firmas que la versión anterior
 (que usaba SQLite local/carpeta compartida), para que el resto de la app
 (tab_empresa.py, tab_clientes.py, etc.) no tenga que cambiar cómo las llama.
 Donde antes se pasaba una ruta de carpeta, ahora se pasa un objeto Server
-con la URL y la clave de API.
+con la URL y los datos de acceso (token de sesión del usuario, o la clave
+maestra del dueño).
 """
 import base64
 from dataclasses import dataclass
@@ -18,22 +19,32 @@ class DBError(Exception):
     pass
 
 
+class SessionExpired(DBError):
+    """La sesión venció o el usuario fue desactivado: hay que volver a entrar."""
+    pass
+
+
 @dataclass
 class Server:
     base_url: str
-    api_key: str
+    api_key: str = ""   # clave maestra (solo el dueño)
+    token: str = ""     # sesión de un usuario (lo normal)
+
+    def headers(self):
+        if self.token:
+            return {"Authorization": f"Bearer {self.token}"}
+        return {"X-API-Key": self.api_key}
 
 
 TIMEOUT = 12
 
 
-def _request(server: Server, method: str, path: str, json=None):
+def _request(server: Server, method: str, path: str, json=None, raw=False):
     if not server or not server.base_url:
         raise DBError('Todavía no se ha configurado el servidor. Ve a "Cambiar servidor" para hacerlo.')
     url = server.base_url.rstrip("/") + path
     try:
-        r = requests.request(method, url, json=json, timeout=TIMEOUT,
-                              headers={"X-API-Key": server.api_key})
+        r = requests.request(method, url, json=json, timeout=TIMEOUT, headers=server.headers())
     except requests.exceptions.ConnectTimeout:
         raise DBError(f"El servidor no respondió a tiempo ({server.base_url}). Puede estar apagado o dormido; espera unos segundos e intenta de nuevo.")
     except requests.exceptions.ConnectionError:
@@ -43,14 +54,16 @@ def _request(server: Server, method: str, path: str, json=None):
     except requests.exceptions.RequestException as e:
         raise DBError(f"Error de red al hablar con el servidor: {e}")
 
-    if r.status_code == 401:
-        raise DBError('La clave de API no es correcta. Revísala en "Cambiar servidor".')
+    if r.status_code == 401 and path != "/api/login":
+        raise SessionExpired("Tu sesión terminó o los datos de acceso no son correctos. Vuelve a entrar.")
     if r.status_code >= 400:
         try:
             detail = r.json().get("error", r.text)
         except ValueError:
             detail = r.text
-        raise DBError(f"El servidor respondió con un error: {detail}")
+        raise DBError(detail if r.status_code in (400, 401, 403, 404, 429) else f"El servidor respondió con un error: {detail}")
+    if raw:
+        return r.content
     try:
         return r.json()
     except ValueError:
@@ -58,8 +71,30 @@ def _request(server: Server, method: str, path: str, json=None):
 
 
 def test_connection(server: Server):
-    """Usado por el asistente de configuración para validar URL + clave."""
+    """Valida URL + datos de acceso."""
     _request(server, "GET", "/api/ping")
+
+
+# ---------- sesión ----------
+
+def login(base_url: str, username: str, password: str):
+    """Devuelve (Server con token, usuario)."""
+    result = _request(Server(base_url=base_url), "POST", "/api/login",
+                      json={"username": username, "password": password})
+    return Server(base_url=base_url, token=result["token"]), result["user"]
+
+
+def logout(server: Server):
+    if server.token:
+        _request(server, "POST", "/api/logout")
+
+
+def me(server: Server) -> dict:
+    return _request(server, "GET", "/api/me")
+
+
+def change_password(server: Server, current: str, new: str):
+    _request(server, "POST", "/api/me/password", json={"current_password": current, "new_password": new})
 
 
 # ---------- empresa ----------
@@ -141,7 +176,8 @@ def restock_product(server: Server, product_id: str, qty: float, note: str = "")
 # ---------- facturas ----------
 
 def create_invoice(server: Server, client_snapshot: dict, items: list, tax_rate: float,
-                    notes: str = "", warranty: str = "", seller: str = ""):
+                    notes: str = "", warranty: str = "", seller: str = "", payment: dict = None):
+    """payment: {"mode": "contado"|"credito", "method": "efectivo"|..., "amount": abono (solo crédito)}"""
     payload = {
         "client_snapshot": client_snapshot,
         "items": [
@@ -152,6 +188,7 @@ def create_invoice(server: Server, client_snapshot: dict, items: list, tax_rate:
         "notes": notes,
         "warranty": warranty,
         "seller": seller,
+        "payment": payment or {"mode": "contado", "method": "efectivo"},
     }
     result = _request(server, "POST", "/api/invoices", json=payload)
     return result["id"], result["number"]
@@ -165,5 +202,21 @@ def get_invoice_with_items(server: Server, invoice_id: str):
     return _request(server, "GET", f"/api/invoices/{invoice_id}")
 
 
-def delete_invoice(server: Server, invoice_id: str):
-    _request(server, "DELETE", f"/api/invoices/{invoice_id}")
+def void_invoice(server: Server, invoice_id: str, reason: str):
+    """Anula la factura (no se borra) y devuelve el stock al inventario."""
+    _request(server, "POST", f"/api/invoices/{invoice_id}/void", json={"reason": reason})
+
+
+def add_payment(server: Server, invoice_id: str, amount: float, method: str, note: str = ""):
+    return _request(server, "POST", f"/api/invoices/{invoice_id}/payments",
+                    json={"amount": amount, "method": method, "note": note})
+
+
+# ---------- resumen y copias de seguridad (administrador) ----------
+
+def dashboard(server: Server, start: float, end: float, tz_offset_minutes: int):
+    return _request(server, "GET", f"/api/dashboard?start={start}&end={end}&tz={tz_offset_minutes}")
+
+
+def download_backup(server: Server) -> bytes:
+    return _request(server, "GET", "/api/backup", raw=True)

@@ -10,50 +10,60 @@
 <link rel="apple-touch-icon" href="icon.svg">
 <style>
   :root {
-    --ink: #16233A; --ink-soft: #3C4A5E; --paper: #FDFCFA; --panel: #F5F4F0;
-    --line: #E1DFD8; --brass: #7C5F2C; --red: #A23B3B; --green: #2F6F4E; --card: #fff;
+    --ink: #16233A; --ink-soft: #3C4A5E; --muted: #6B7686; --paper: #FDFCFA; --panel: #F5F4F0;
+    --line: #E1DFD8; --brass: #7C5F2C; --gold: #C9A45C; --red: #A23B3B; --green: #2F6F4E; --amber: #8A5A00;
+    --card: #fff; --bar: #2B4C7E; --bar-hover: #16233A;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--paper); color: var(--ink);
     font: 16px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   button, input, select, textarea { font: inherit; color: inherit; }
-  h1, h2 { font-family: Georgia, "Times New Roman", serif; margin: 0; }
+  h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; margin: 0; }
   h2 { font-size: 1.35rem; }
+  h3 { font-size: 1.05rem; margin-bottom: 10px; }
   .muted { color: var(--ink-soft); font-size: .9rem; }
   .hidden { display: none !important; }
 
   header.top { position: sticky; top: 0; z-index: 10; background: var(--ink); color: #fff;
     padding: calc(10px + env(safe-area-inset-top)) 16px 0; }
   header.top .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  header.top h1 { font-size: 1.2rem; }
-  header.top .logout { background: transparent; border: 1px solid #ffffff55; color: #fff;
-    border-radius: 6px; padding: 4px 10px; font-size: .85rem; cursor: pointer; }
+  header.top h1 { font-size: 1.2rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  header.top .who { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+  header.top .who button { background: transparent; border: 1px solid #ffffff55; color: #fff;
+    border-radius: 6px; padding: 4px 10px; font-size: .85rem; cursor: pointer; max-width: 160px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   nav.tabs { display: flex; gap: 4px; overflow-x: auto; margin-top: 8px; scrollbar-width: none; }
   nav.tabs::-webkit-scrollbar { display: none; }
   nav.tabs button { flex: 0 0 auto; background: transparent; border: 0; color: #ffffffb0;
     padding: 10px 12px; border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; }
-  nav.tabs button.active { color: #fff; border-bottom-color: #C9A45C; font-weight: 600; }
+  nav.tabs button.active { color: #fff; border-bottom-color: var(--gold); font-weight: 600; }
 
-  main { max-width: 860px; margin: 0 auto; padding: 16px 16px 96px; }
+  main { max-width: 900px; margin: 0 auto; padding: 16px 16px 96px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
   .toolbar { display: flex; gap: 8px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
   .toolbar input[type=search] { flex: 1 1 180px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 12px; }
+  .chip { border: 1px solid var(--line); background: #fff; border-radius: 99px; padding: 6px 12px; cursor: pointer; font-size: .9rem; }
+  .chip.active { background: var(--ink); border-color: var(--ink); color: #fff; }
 
   label.f { display: block; margin-bottom: 12px; }
   label.f > span { display: block; font-size: .85rem; color: var(--ink-soft); margin-bottom: 4px; }
   input, select, textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
     background: #fff; min-height: 44px; }
-  input:focus, select:focus, textarea:focus { outline: 2px solid #C9A45C66; border-color: #C9A45C; }
+  input[type=checkbox] { width: auto; min-height: 0; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid #C9A45C66; border-color: var(--gold); }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
   @media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
 
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px;
-    padding: 0 16px; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+    padding: 0 16px; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer; text-decoration: none; }
   .btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; font-weight: 600; }
   .btn.danger { color: var(--red); border-color: #E7C3BE; }
+  .btn.good { color: var(--green); border-color: #BFD8C9; }
   .btn.small { min-height: 36px; padding: 0 12px; font-size: .9rem; }
   .btn.block { width: 100%; }
   .btn:disabled { opacity: .6; cursor: progress; }
+  .linkbtn { background: none; border: 0; color: var(--ink-soft); text-decoration: underline; cursor: pointer; padding: 8px 0; font-size: .9rem; }
 
   ul.list { list-style: none; margin: 0; padding: 0; }
   ul.list li { display: flex; justify-content: space-between; gap: 10px; align-items: center;
@@ -62,9 +72,14 @@
   ul.list .main { min-width: 0; flex: 1; }
   ul.list .title { font-weight: 600; overflow-wrap: anywhere; }
   ul.list .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-  .empty { text-align: center; color: var(--ink-soft); padding: 28px 8px; }
-  .badge { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: .78rem; background: var(--panel); }
-  .badge.low { background: #FBEEEC; color: var(--red); }
+  ul.list li.voided .title { text-decoration: line-through; color: var(--muted); }
+  @media (max-width: 560px) { ul.list li { flex-wrap: wrap; } ul.list .actions { width: 100%; justify-content: flex-start; } }
+  .empty { text-align: center; color: var(--ink-soft); padding: 28px 8px; display: block !important; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: .78rem; background: var(--panel); color: var(--ink-soft); white-space: nowrap; }
+  .badge.low, .badge.pendiente, .badge.anulada { background: #FBEEEC; color: var(--red); }
+  .badge.abono { background: #FFF4DC; color: var(--amber); }
+  .badge.pagada { background: #E8F3EC; color: var(--green); }
+  .badge.admin { background: #EEE8DA; color: var(--brass); }
 
   .line-item { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 10px; background: #fff; }
   .line-item .nums { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 8px; }
@@ -72,18 +87,45 @@
   .line-item .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
   .money { font-family: ui-monospace, Consolas, monospace; }
   .totals { background: var(--panel); border-radius: 8px; padding: 12px 16px; margin: 14px 0; }
-  .totals div { display: flex; justify-content: space-between; padding: 3px 0; }
+  .totals div { display: flex; justify-content: space-between; padding: 3px 0; gap: 12px; }
   .totals .grand { font-weight: 700; font-size: 1.15rem; border-top: 1px solid var(--line); margin-top: 6px; padding-top: 8px; }
   .errors { background: #FBEEEC; border: 1px solid #E7C3BE; color: #7A2E2E; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
   .errors ul { margin: 6px 0 0; padding-left: 18px; }
+  .note { background: var(--panel); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: .9rem; color: var(--ink-soft); }
   .client-info { font-size: .9rem; color: var(--ink-soft); white-space: pre-line; margin: -4px 0 12px; }
   .logo-prev { max-width: 180px; max-height: 80px; display: block; margin: 6px 0 10px; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
+  .seg label { flex: 1; text-align: center; padding: 10px 6px; cursor: pointer; font-size: .95rem; }
+  .seg input { display: none; }
+  .seg label:has(input:checked) { background: var(--ink); color: #fff; font-weight: 600; }
 
-  dialog { border: 0; border-radius: 12px; padding: 0; width: min(520px, calc(100vw - 24px)); max-height: calc(100vh - 40px); }
+  table.t { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  table.t th { text-align: left; font-weight: 600; color: var(--ink-soft); font-size: .8rem; text-transform: uppercase;
+    letter-spacing: .03em; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+  table.t td { padding: 8px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.t tr:last-child td { border-bottom: 0; }
+  table.t .r { text-align: right; white-space: nowrap; }
+
+  /* resumen */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .tile .k { font-size: .8rem; color: var(--ink-soft); }
+  .tile .v { font-size: clamp(.95rem, 4vw, 1.35rem); font-weight: 700; margin-top: 2px; font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
+  .tile .s { font-size: .8rem; color: var(--muted); margin-top: 2px; }
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; height: 220px; overflow: visible; }
+  .chart .bar { fill: var(--bar); }
+  .chart .hit:hover + .bar, .chart .bar.on { fill: var(--bar-hover); }
+  .chart .grid line { stroke: var(--line); stroke-width: 1; }
+  .chart text { fill: var(--muted); font-size: 11px; }
+  .chart .tip { position: absolute; pointer-events: none; background: var(--ink); color: #fff; border-radius: 6px;
+    padding: 6px 10px; font-size: .85rem; white-space: nowrap; transform: translate(-50%, -100%); margin-top: -8px; }
+
+  dialog { border: 0; border-radius: 12px; padding: 0; width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 40px); }
   dialog::backdrop { background: #16233A88; }
   dialog form { padding: 18px; }
   dialog h2 { margin-bottom: 14px; }
-  dialog .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+  dialog .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; flex-wrap: wrap; }
 
   #toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%);
     background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 8px; max-width: calc(100vw - 32px);
@@ -100,11 +142,14 @@
 <section id="login" class="hidden">
   <form class="card" id="login-form">
     <h1>Facturador</h1>
-    <p class="muted">Ingresa la clave de acceso de tu empresa.</p>
-    <label class="f"><span>Clave de acceso</span>
-      <input type="password" id="login-key" autocomplete="current-password" required></label>
+    <p class="muted" id="login-hint">Entra con tu usuario y contraseña.</p>
+    <label class="f" id="login-user-wrap"><span>Usuario</span>
+      <input id="login-user" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+    <label class="f"><span id="login-pass-label">Contraseña</span>
+      <input type="password" id="login-pass" autocomplete="current-password" required></label>
     <div id="login-error" class="errors hidden"></div>
     <button class="btn primary block" type="submit">Entrar</button>
+    <button class="linkbtn" type="button" id="login-mode">Entrar con la clave maestra (dueño)</button>
   </form>
 </section>
 
@@ -112,16 +157,9 @@
   <header class="top">
     <div class="row">
       <h1 id="company-title">Facturador</h1>
-      <button class="logout" id="logout">Salir</button>
+      <div class="who"><button id="me" title="Mi cuenta"></button><button id="logout">Salir</button></div>
     </div>
-    <nav class="tabs" id="tabs">
-      <button data-tab="factura">Nueva factura</button>
-      <button data-tab="historial">Historial</button>
-      <button data-tab="productos">Productos</button>
-      <button data-tab="clientes">Clientes</button>
-      <button data-tab="proveedores">Proveedores</button>
-      <button data-tab="empresa">Mi empresa</button>
-    </nav>
+    <nav class="tabs" id="tabs"></nav>
   </header>
   <main id="view"></main>
 </div>
@@ -131,10 +169,17 @@
 
 <script>
 "use strict";
-const KEY_STORAGE = "facturador_key";
-let apiKey = "";
+const AUTH_STORAGE = "facturador_auth";
+const PAYMENT_METHODS = [["efectivo", "Efectivo"], ["transferencia", "Transferencia"], ["tarjeta", "Tarjeta"], ["otro", "Otro"]];
+const METHOD_LABEL = Object.fromEntries(PAYMENT_METHODS);
+const STATUS_LABEL = { pagada: "Pagada", abono: "Abono", pendiente: "Pendiente", anulada: "Anulada", sin_registro: "Sin registro de pago" };
+const ALL_TABS = [
+  ["resumen", "Resumen", true], ["factura", "Nueva factura"], ["historial", "Historial"], ["productos", "Productos"],
+  ["clientes", "Clientes"], ["proveedores", "Proveedores", true], ["empresa", "Mi empresa", true], ["usuarios", "Usuarios", true],
+];
+let auth = null;      // {mode: "token"|"key", secret, user}
 let company = {};
-let currentTab = "factura";
+let currentTab = null;
 
 // ---------- utilidades ----------
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -143,31 +188,39 @@ const num = (v) => { const n = parseFloat(String(v ?? "").replace(",", ".")); re
 const fmtNum = (n) => (n ?? 0).toLocaleString("es", { maximumFractionDigits: 3 });
 const money = (v) => `${company.currency || "$"} ${(Number(v) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (ts) => ts ? new Date(ts * 1000).toLocaleDateString("es", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
+const fmtDateTime = (ts) => ts ? new Date(ts * 1000).toLocaleString("es", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+const isAdmin = () => auth?.user?.role === "admin";
+const badge = (status) => `<span class="badge ${esc(status)}">${esc(STATUS_LABEL[status] || status)}</span>`;
 
-function storageGet() { try { return localStorage.getItem(KEY_STORAGE) || ""; } catch { return ""; } }
-function storageSet(v) { try { v ? localStorage.setItem(KEY_STORAGE, v) : localStorage.removeItem(KEY_STORAGE); } catch {} }
+function storageGet() { try { return JSON.parse(localStorage.getItem(AUTH_STORAGE) || "null"); } catch { return null; } }
+function storageSet(v) { try { v ? localStorage.setItem(AUTH_STORAGE, JSON.stringify(v)) : localStorage.removeItem(AUTH_STORAGE); } catch {} }
 
 let toastTimer;
 function toast(msg, error = false) {
   const t = $("#toast");
   t.textContent = msg; t.className = error ? "error" : "";
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add("hidden"), 3500);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add("hidden"), 3800);
 }
 
 class ApiError extends Error {}
+
+function authHeaders(a = auth) {
+  if (!a) return {};
+  return a.mode === "key" ? { "X-API-Key": a.secret } : { Authorization: `Bearer ${a.secret}` };
+}
 
 async function api(method, path, body, { raw = false } = {}) {
   let r;
   try {
     r = await fetch(path, {
       method,
-      headers: { "X-API-Key": apiKey, ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
+      headers: { ...authHeaders(), ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
     throw new ApiError("No se pudo conectar con el servidor. Revisa tu conexión a internet.");
   }
-  if (r.status === 401) { logout("La clave de acceso no es correcta."); throw new ApiError("Clave incorrecta."); }
+  if (r.status === 401) { logout("Tu sesión terminó. Vuelve a entrar."); throw new ApiError("Sesión vencida."); }
   if (!r.ok) {
     let detail = r.statusText;
     try { detail = (await r.json()).error || detail; } catch {}
@@ -182,31 +235,38 @@ async function guarded(fn) {
 }
 
 // ---------- modal genérico ----------
-// fields: [{name, label, type, required, options:[{value,label}], placeholder, step}]
-function openForm(title, fields, values = {}, submitLabel = "Guardar") {
+// fields: [{name, label, type, required, options:[{value,label}], placeholder, default, validate, help}]
+function openForm(title, fields, values = {}, submitLabel = "Guardar", intro = "") {
   return new Promise((resolve) => {
     const dlg = $("#modal"), form = $("#modal-form");
-    form.innerHTML = `<h2>${esc(title)}</h2>` + fields.map((f) => {
+    form.innerHTML = `<h2>${esc(title)}</h2>${intro}` + fields.map((f) => {
       const v = values[f.name] ?? f.default ?? "";
       let input;
       if (f.type === "select") {
         input = `<select name="${f.name}">${f.options.map((o) =>
           `<option value="${esc(o.value)}" ${String(o.value) === String(v) ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`;
+      } else if (f.type === "checkbox") {
+        return `<label class="f" style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="${f.name}" ${v ? "checked" : ""}> ${esc(f.label)}</label>`;
       } else {
         const t = f.type || "text";
         input = `<input name="${f.name}" type="${t}" value="${esc(v)}" ${f.required ? "required" : ""}
-          ${t === "number" ? `step="${f.step || "any"}" inputmode="decimal"` : ""} placeholder="${esc(f.placeholder || "")}">`;
+          ${t === "number" ? `step="any" inputmode="decimal"` : ""} ${f.autocomplete ? `autocomplete="${f.autocomplete}"` : ""}
+          placeholder="${esc(f.placeholder || "")}">`;
       }
-      return `<label class="f"><span>${esc(f.label)}${f.required ? " *" : ""}</span>${input}</label>`;
+      return `<label class="f"><span>${esc(f.label)}${f.required ? " *" : ""}</span>${input}${f.help ? `<span class="muted" style="font-size:.8rem">${esc(f.help)}</span>` : ""}</label>`;
     }).join("") + `<div id="form-error" class="errors hidden"></div>
       <div class="btns"><button class="btn" value="cancel" formnovalidate>Cancelar</button>
       <button class="btn primary" value="ok">${esc(submitLabel)}</button></div>`;
+    form.onclick = null;
     form.onsubmit = (ev) => {
       if (ev.submitter?.value !== "ok") return;
-      const data = Object.fromEntries(new FormData(form).entries());
+      const fd = new FormData(form);
+      const data = {};
       for (const f of fields) {
-        if (f.type === "number") data[f.name] = data[f.name] === "" ? null : num(data[f.name]);
-        else data[f.name] = (data[f.name] ?? "").trim();
+        if (f.type === "checkbox") data[f.name] = fd.get(f.name) === "on";
+        else if (f.type === "number") data[f.name] = fd.get(f.name) === "" ? null : num(fd.get(f.name));
+        else if (f.type === "password") data[f.name] = fd.get(f.name) ?? "";
+        else data[f.name] = (fd.get(f.name) ?? "").trim();
       }
       const err = fields.map((f) => f.validate?.(data[f.name], data)).filter(Boolean);
       if (err.length) {
@@ -220,33 +280,75 @@ function openForm(title, fields, values = {}, submitLabel = "Guardar") {
     dlg.returnData = null;
     dlg.onclose = () => resolve(dlg.returnData);
     dlg.showModal();
-    form.querySelector("input, select")?.focus();
+    form.querySelector("input:not([type=checkbox]), select")?.focus();
   });
 }
+
+function showDialog(html, onReady) {
+  const dlg = $("#modal"), form = $("#modal-form");
+  form.innerHTML = html;
+  form.onsubmit = null;
+  dlg.returnData = null;
+  dlg.onclose = null;
+  dlg.showModal();
+  onReady?.(form, dlg);
+}
+
+// Cierra el diálogo y espera su evento "close" (si no, ese evento llega tarde y cancela el siguiente diálogo).
+const closeModal = (dlg) => new Promise((r) => { dlg.addEventListener("close", () => r(), { once: true }); dlg.close(); });
 
 const emailOk = (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? null : "El correo no tiene un formato válido.";
 
 // ---------- login ----------
+let loginMode = "token";
+function setLoginMode(mode) {
+  loginMode = mode;
+  $("#login-user-wrap").classList.toggle("hidden", mode === "key");
+  $("#login-pass-label").textContent = mode === "key" ? "Clave maestra" : "Contraseña";
+  $("#login-hint").textContent = mode === "key"
+    ? "Solo para el dueño: crear usuarios o recuperar el acceso."
+    : "Entra con tu usuario y contraseña.";
+  $("#login-mode").textContent = mode === "key" ? "Entrar con usuario y contraseña" : "Entrar con la clave maestra (dueño)";
+}
+$("#login-mode").addEventListener("click", () => { setLoginMode(loginMode === "key" ? "token" : "key"); showLoginError(""); });
+
+function showLoginError(msg) {
+  const box = $("#login-error");
+  box.textContent = msg; box.classList.toggle("hidden", !msg);
+}
+
 function showLogin(msg = "") {
   $("#app").classList.add("hidden");
   $("#login").classList.remove("hidden");
-  const box = $("#login-error");
-  box.textContent = msg; box.classList.toggle("hidden", !msg);
-  $("#login-key").value = "";
-  $("#login-key").focus();
+  showLoginError(msg);
+  $("#login-pass").value = "";
+  (loginMode === "key" ? $("#login-pass") : $("#login-user")).focus();
 }
 
-function logout(msg = "") { apiKey = ""; storageSet(""); showLogin(msg); }
+function logout(msg = "") {
+  if (auth?.mode === "token") fetch("api/logout", { method: "POST", headers: authHeaders() }).catch(() => {});
+  auth = null; storageSet(null); currentTab = null; showLogin(msg);
+}
 
 $("#login-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const btn = ev.submitter; btn.disabled = true;
-  apiKey = $("#login-key").value.trim();
   try {
-    const r = await fetch("api/ping", { headers: { "X-API-Key": apiKey } });
-    if (r.status === 401) return showLogin("La clave de acceso no es correcta.");
-    if (!r.ok) return showLogin("El servidor respondió con un error. Intenta de nuevo.");
-    storageSet(apiKey);
+    const pass = $("#login-pass").value;
+    let candidate;
+    if (loginMode === "key") {
+      const r = await fetch("api/me", { headers: { "X-API-Key": pass.trim() } });
+      if (r.status === 401) return showLogin("La clave maestra no es correcta.");
+      if (!r.ok) return showLogin("El servidor respondió con un error. Intenta de nuevo.");
+      candidate = { mode: "key", secret: pass.trim(), user: await r.json() };
+    } else {
+      const r = await fetch("api/login", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: $("#login-user").value.trim(), password: pass }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) return showLogin(data.error || "No se pudo entrar. Intenta de nuevo.");
+      candidate = { mode: "token", secret: data.token, user: data.user };
+    }
+    auth = candidate; storageSet(auth);
     await startApp();
   } catch {
     showLogin("No se pudo conectar con el servidor. Revisa tu conexión a internet.");
@@ -254,12 +356,28 @@ $("#login-form").addEventListener("submit", async (ev) => {
 });
 
 $("#logout").addEventListener("click", () => logout());
+$("#me").addEventListener("click", async () => {
+  if (auth.mode === "key") return toast("Entraste con la clave maestra. Para cambiarla hay que editar el servidor.");
+  const data = await openForm("Cambiar mi contraseña", [
+    { name: "current_password", label: "Contraseña actual", type: "password", required: true, autocomplete: "current-password" },
+    { name: "new_password", label: "Contraseña nueva", type: "password", required: true, autocomplete: "new-password",
+      validate: (v) => v.length >= 6 ? null : "La contraseña nueva debe tener al menos 6 caracteres." },
+    { name: "confirm", label: "Repite la contraseña nueva", type: "password", required: true, autocomplete: "new-password",
+      validate: (v, d) => v === d.new_password ? null : "Las contraseñas nuevas no coinciden." },
+  ], {}, "Cambiar", `<p class="muted">Se cerrará la sesión en tus otros dispositivos.</p>`);
+  if (data) guarded(async () => { await api("POST", "api/me/password", data); toast("Contraseña cambiada."); });
+});
 
 async function startApp() {
+  auth.user = await api("GET", "api/me");
+  storageSet(auth);
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
+  $("#me").textContent = `${auth.user.name}${isAdmin() ? " · admin" : ""}`;
+  $("#tabs").innerHTML = ALL_TABS.filter(([, , adminOnly]) => !adminOnly || isAdmin())
+    .map(([key, label]) => `<button data-tab="${key}">${esc(label)}</button>`).join("");
   await loadCompany();
-  go(currentTab);
+  go(currentTab && (isAdmin() || !ALL_TABS.find((t) => t[0] === currentTab)[2]) ? currentTab : (isAdmin() ? "resumen" : "factura"));
 }
 
 async function loadCompany() {
@@ -275,6 +393,7 @@ $("#tabs").addEventListener("click", (ev) => { const t = ev.target.closest("butt
 async function go(tab) {
   currentTab = tab;
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  $(`#tabs button[data-tab="${tab}"]`)?.scrollIntoView({ inline: "nearest", block: "nearest" });
   const view = $("#view");
   view.innerHTML = `<p class="muted">Cargando…</p>`;
   window.scrollTo(0, 0);
@@ -287,6 +406,126 @@ function searchable(view, renderList) {
   input.addEventListener("input", () => renderList(input.value.trim().toLowerCase()));
   renderList("");
 }
+
+async function downloadBlob(path, name, type) {
+  const r = await api("GET", path, undefined, { raw: true });
+  const blob = await r.blob();
+  const file = new File([blob], name, { type });
+  // En el celular, ofrece compartir (WhatsApp, correo…) si el navegador lo permite.
+  if (type === "application/pdf" && navigator.canShare?.({ files: [file] }) && matchMedia("(pointer: coarse)").matches) {
+    try { await navigator.share({ files: [file], title: name }); return; }
+    catch (e) { if (e.name === "AbortError") return; }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+const downloadPdf = (inv) => downloadBlob(`api/invoices/${inv.id}/pdf`, `${inv.number}.pdf`, "application/pdf");
+
+// ---------- resumen (administrador) ----------
+function rangeFor(preset) {
+  const now = new Date(), d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const day = 86400000;
+  switch (preset) {
+    case "hoy": return [d0, new Date(+d0 + day)];
+    case "7d": return [new Date(+d0 - 6 * day), new Date(+d0 + day)];
+    case "30d": return [new Date(+d0 - 29 * day), new Date(+d0 + day)];
+    case "mes": return [new Date(now.getFullYear(), now.getMonth(), 1), new Date(now.getFullYear(), now.getMonth() + 1, 1)];
+    case "mespasado": return [new Date(now.getFullYear(), now.getMonth() - 1, 1), new Date(now.getFullYear(), now.getMonth(), 1)];
+    case "anio": return [new Date(now.getFullYear(), 0, 1), new Date(now.getFullYear() + 1, 0, 1)];
+  }
+}
+const PRESETS = [["hoy", "Hoy"], ["7d", "7 días"], ["30d", "30 días"], ["mes", "Este mes"], ["mespasado", "Mes pasado"], ["anio", "Este año"]];
+let resumenPreset = "30d";
+
+function niceMax(v) {
+  if (v <= 0) return 1;
+  const p = 10 ** Math.floor(Math.log10(v)), n = v / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
+}
+const shortMoney = (v) => {
+  const a = Math.abs(v);
+  return a >= 1e9 ? (v / 1e9).toFixed(1).replace(/\.0$/, "") + "MM" : a >= 1e6 ? (v / 1e6).toFixed(1).replace(/\.0$/, "") + "M"
+    : a >= 1e3 ? (v / 1e3).toFixed(0) + "k" : String(Math.round(v));
+};
+
+function barChart(points, unit) {
+  // Una sola serie: barras finas con punta redondeada, eje recesivo y tooltip al pasar o tocar.
+  const W = 640, H = 220, L = 44, R = 8, T = 10, B = 24;
+  const max = niceMax(Math.max(0, ...points.map((p) => p.total)));
+  const n = Math.max(points.length, 1), slot = (W - L - R) / n, bw = Math.max(2, Math.min(28, slot - 2));
+  const y = (v) => T + (H - T - B) * (1 - v / max);
+  const label = (p) => unit === "month"
+    ? new Date(p.date + "-01T12:00").toLocaleDateString("es", { month: "short", year: "2-digit" })
+    : new Date(p.date + "T12:00").toLocaleDateString("es", { day: "numeric", month: "short" });
+  const every = Math.ceil(n / 7);
+  const ticks = [0, max / 2, max];
+  let s = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Ventas por ${unit === "month" ? "mes" : "día"}"><g class="grid">`;
+  for (const t of ticks) s += `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/>`;
+  s += `</g>`;
+  for (const t of ticks) s += `<text x="${L - 6}" y="${y(t) + 4}" text-anchor="end">${shortMoney(t)}</text>`;
+  points.forEach((p, i) => {
+    const x = L + i * slot + (slot - bw) / 2, h = Math.max(0, (H - B) - y(p.total)), r = Math.min(4, bw / 2, h);
+    const top = (H - B) - h;
+    const path = h <= 0 ? "" : `M${x},${H - B}V${top + r}Q${x},${top} ${x + r},${top}H${x + bw - r}Q${x + bw},${top} ${x + bw},${top + r}V${H - B}Z`;
+    s += `<rect class="hit" data-i="${i}" x="${L + i * slot}" y="${T}" width="${slot}" height="${H - T - B}" fill="transparent"/>`;
+    s += `<path class="bar" data-i="${i}" d="${path}"/>`;
+    if (i % every === 0) s += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle">${esc(label(p))}</text>`;
+  });
+  s += `</svg><div class="tip hidden"></div>`;
+  const wrap = document.createElement("div");
+  wrap.className = "chart"; wrap.innerHTML = s;
+  const tip = $(".tip", wrap), svg = $("svg", wrap);
+  const show = (i) => {
+    wrap.querySelectorAll(".bar").forEach((b) => b.classList.toggle("on", b.dataset.i === String(i)));
+    const p = points[i], rect = svg.getBoundingClientRect(), sx = rect.width / W;
+    tip.innerHTML = `<b>${esc(label(p))}</b> · ${esc(money(p.total))} · ${p.count} factura${p.count === 1 ? "" : "s"}`;
+    tip.style.left = `${Math.min(Math.max((L + i * slot + slot / 2) * sx, 90), rect.width - 90)}px`;
+    tip.style.top = `${y(p.total) * (rect.height / H)}px`;
+    tip.classList.remove("hidden");
+  };
+  const hide = () => { tip.classList.add("hidden"); wrap.querySelectorAll(".bar.on").forEach((b) => b.classList.remove("on")); };
+  svg.addEventListener("pointermove", (e) => { const i = e.target.dataset?.i; if (i !== undefined) show(+i); });
+  svg.addEventListener("pointerdown", (e) => { const i = e.target.dataset?.i; if (i !== undefined) show(+i); });
+  svg.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") hide(); });
+  return wrap;
+}
+
+views.resumen = async (view) => {
+  const [from, to] = rangeFor(resumenPreset);
+  const q = `start=${from / 1000}&end=${to / 1000}&tz=${new Date().getTimezoneOffset()}`;
+  const d = await api("GET", `api/dashboard?${q}`);
+  const s = d.summary;
+  const margin = s.net > 0 ? Math.round((s.profit / s.net) * 100) : 0;
+  view.innerHTML = `<h2>Resumen de ventas</h2>
+    <div class="chips" id="presets" style="margin-top:12px">${PRESETS.map(([k, l]) =>
+      `<button class="chip ${k === resumenPreset ? "active" : ""}" data-p="${k}">${l}</button>`).join("")}</div>
+    <div class="tiles">
+      <div class="tile"><div class="k">Ventas (con ${esc(company.tax_label || "impuesto")})</div><div class="v">${esc(money(s.total))}</div><div class="s">${s.count} factura${s.count === 1 ? "" : "s"}</div></div>
+      <div class="tile"><div class="k">Ganancia estimada</div><div class="v">${esc(money(s.profit))}</div><div class="s">${margin}% sobre ventas sin impuesto</div></div>
+      <div class="tile"><div class="k">Cobrado en el período</div><div class="v">${esc(money(d.collected.total))}</div><div class="s">${esc(d.collected.by_method.map((m) => METHOD_LABEL[m.method] || m.method).join(" · ") || "sin pagos")}</div></div>
+      <div class="tile"><div class="k">Por cobrar (total)</div><div class="v">${esc(money(d.receivables.total))}</div><div class="s">${d.receivables.count} factura${d.receivables.count === 1 ? "" : "s"} con saldo</div></div>
+    </div>
+    ${s.items_without_cost ? `<div class="note">${s.items_without_cost} artículo(s) vendidos no tienen precio de costo, así que la ganancia aparece más alta de lo real. Pon el costo en Productos.</div>` : ""}
+    <div class="card"><h3>Ventas por ${d.series.unit === "month" ? "mes" : "día"}</h3><div id="chart"></div>
+      <p class="muted" style="margin:8px 0 0">Promedio por factura: <span class="money">${esc(money(s.avg_ticket))}</span>
+      · Descuentos: <span class="money">${esc(money(s.discount))}</span> · ${esc(company.tax_label || "Impuesto")}: <span class="money">${esc(money(s.tax))}</span></p></div>
+    <div class="card"><h3>Productos más vendidos</h3>${d.top_products.length ? `<table class="t"><thead><tr><th>Producto</th><th class="r">Cant.</th><th class="r">Ventas sin imp.</th></tr></thead><tbody>
+      ${d.top_products.map((p) => `<tr><td>${esc(p.name)}</td><td class="r">${fmtNum(p.qty)}</td><td class="r money">${esc(money(p.net))}</td></tr>`).join("")}</tbody></table>`
+      : `<p class="muted">Sin ventas en este período.</p>`}</div>
+    <div class="card"><h3>Por vendedor</h3>${d.by_seller.length ? `<table class="t"><thead><tr><th>Vendedor</th><th class="r">Facturas</th><th class="r">Ventas</th></tr></thead><tbody>
+      ${d.by_seller.map((p) => `<tr><td>${esc(p.name)}</td><td class="r">${p.count}</td><td class="r money">${esc(money(p.total))}</td></tr>`).join("")}</tbody></table>`
+      : `<p class="muted">Sin ventas en este período.</p>`}</div>
+    <div class="card"><h3>Cuentas por cobrar</h3>${d.receivables.invoices.length ? `<table class="t"><thead><tr><th>Factura</th><th>Cliente</th><th class="r">Saldo</th></tr></thead><tbody>
+      ${d.receivables.invoices.map((r) => `<tr><td>${esc(r.number)}<div class="muted" style="font-size:.8rem">${esc(fmtDate(r.created_at))}</div></td><td>${esc(r.client_name)}</td><td class="r money">${esc(money(r.balance))}</td></tr>`).join("")}</tbody></table>
+      <button class="btn small" style="margin-top:10px" id="see-pending">Ver en Historial</button>`
+      : `<p class="muted">Nadie te debe. 🎉</p>`}</div>`;
+  $("#chart", view).appendChild(barChart(d.series.points, d.series.unit));
+  $("#presets", view).onclick = (ev) => { const p = ev.target.dataset.p; if (p) { resumenPreset = p; go("resumen"); } };
+  const sp = $("#see-pending", view);
+  if (sp) sp.onclick = () => { historialFilter = "por_cobrar"; go("historial"); };
+};
 
 // ---------- clientes ----------
 const CLIENT_FIELDS = [
@@ -318,19 +557,19 @@ views.clientes = async (view) => {
         <div class="title">${esc(c.name)}</div>
         <div class="muted">${esc([c.doc, c.phone, c.email].filter(Boolean).join(" · "))}</div></div>
         <div class="actions"><button class="btn small" data-edit="${i}">Editar</button>
-        <button class="btn small danger" data-del="${i}">Eliminar</button></div></li>`).join("")
+        ${isAdmin() ? `<button class="btn small danger" data-del="${i}">Eliminar</button>` : ""}</div></li>`).join("")
       : `<li class="empty">${clients.length ? "Sin resultados." : "Aún no hay clientes."}</li>`;
     $("#list", view).onclick = async (ev) => {
       const e = ev.target.dataset;
       if (e.edit) { if (await editClient(rows[e.edit])) go("clientes"); }
-      if (e.del && confirm(`¿Eliminar a ${rows[e.del].name}?`)) {
+      if (e.del && confirm(`¿Eliminar a ${rows[e.del].name}? Sus facturas no se borran.`)) {
         await guarded(async () => { await api("DELETE", `api/clients/${rows[e.del].id}`); toast("Cliente eliminado."); go("clientes"); });
       }
     };
   });
 };
 
-// ---------- proveedores ----------
+// ---------- proveedores (administrador) ----------
 const SUPPLIER_FIELDS = [
   { name: "name", label: "Nombre del proveedor", required: true },
   { name: "contact_name", label: "Persona de contacto" },
@@ -372,12 +611,13 @@ views.proveedores = async (view) => {
 
 // ---------- productos ----------
 views.productos = async (view) => {
-  const [products, suppliers] = await Promise.all([api("GET", "api/products"), api("GET", "api/suppliers")]);
+  const admin = isAdmin();
+  const [products, suppliers] = await Promise.all([api("GET", "api/products"), admin ? api("GET", "api/suppliers") : []]);
   const fields = [
     { name: "name", label: "Nombre", required: true },
     { name: "price", label: `Precio de venta (${company.currency || "$"})`, type: "number", required: true,
       validate: (v) => v > 0 ? null : "El precio debe ser mayor que cero." },
-    { name: "cost_price", label: "Precio de costo", type: "number", default: 0,
+    { name: "cost_price", label: "Precio de costo", type: "number", default: 0, help: "Se usa para calcular la ganancia en el Resumen.",
       validate: (v) => v === null || v >= 0 ? null : "El costo no puede ser negativo." },
     { name: "stock_qty", label: "Existencias (stock)", type: "number", default: 0,
       validate: (v) => v === null || v >= 0 ? null : "Las existencias no pueden ser negativas." },
@@ -386,7 +626,7 @@ views.productos = async (view) => {
       options: [{ value: "", label: "— sin proveedor —" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))] },
   ];
   view.innerHTML = `<h2>Productos</h2>
-    <div class="toolbar"><input type="search" placeholder="Buscar producto…"><button class="btn primary" id="add">+ Nuevo</button></div>
+    <div class="toolbar"><input type="search" placeholder="Buscar producto…">${admin ? `<button class="btn primary" id="add">+ Nuevo</button>` : ""}</div>
     <div class="card"><ul class="list" id="list"></ul></div>`;
   const edit = async (p = {}) => {
     const data = await openForm(p.id ? "Editar producto" : "Nuevo producto", fields, p);
@@ -406,7 +646,7 @@ views.productos = async (view) => {
     if (!data) return;
     await guarded(async () => { await api("POST", `api/products/${p.id}/restock`, data); toast("Stock actualizado."); go("productos"); });
   };
-  $("#add", view).onclick = () => edit();
+  if (admin) $("#add", view).onclick = () => edit();
   searchable(view, (q) => {
     const rows = products.filter((p) => [p.name, p.supplier_name].join(" ").toLowerCase().includes(q));
     $("#list", view).innerHTML = rows.length ? rows.map((p, i) => `<li><div class="main">
@@ -414,9 +654,9 @@ views.productos = async (view) => {
         <div class="muted"><span class="money">${esc(money(p.price))}</span> / ${esc(p.unit || "unidad")}
           · <span class="badge ${(p.stock_qty || 0) <= 0 ? "low" : ""}">Stock: ${fmtNum(p.stock_qty)}</span>
           ${p.supplier_name ? " · " + esc(p.supplier_name) : ""}</div></div>
-        <div class="actions"><button class="btn small" data-restock="${i}">+ Stock</button>
+        ${admin ? `<div class="actions"><button class="btn small" data-restock="${i}">+ Stock</button>
         <button class="btn small" data-edit="${i}">Editar</button>
-        <button class="btn small danger" data-del="${i}">Eliminar</button></div></li>`).join("")
+        <button class="btn small danger" data-del="${i}">Eliminar</button></div>` : ""}</li>`).join("")
       : `<li class="empty">${products.length ? "Sin resultados." : "Aún no hay productos."}</li>`;
     $("#list", view).onclick = async (ev) => {
       const e = ev.target.dataset;
@@ -429,9 +669,9 @@ views.productos = async (view) => {
   });
 };
 
-// ---------- empresa ----------
+// ---------- empresa + copias de seguridad (administrador) ----------
 views.empresa = async (view) => {
-  await loadCompany();
+  const [, backups] = await Promise.all([loadCompany(), api("GET", "api/backups")]);
   const c = company;
   view.innerHTML = `<h2>Mi empresa</h2><p class="muted">Estos datos aparecen en el encabezado de cada factura.</p>
     <form class="card" id="f">
@@ -452,11 +692,20 @@ views.empresa = async (view) => {
       <div id="err" class="errors hidden"></div>
       <button class="btn primary" type="submit">Guardar datos</button>
     </form>
-    <div class="card"><h2 style="font-size:1.1rem">Logo</h2>
+    <div class="card"><h3>Logo</h3>
       ${c.logo_base64 ? `<img class="logo-prev" src="data:${esc(c.logo_mime || "image/png")};base64,${c.logo_base64}" alt="Logo actual">` : `<p class="muted">Sin logo.</p>`}
       <div class="toolbar"><label class="btn"><input type="file" id="logo" accept="image/png,image/jpeg" class="hidden">Elegir imagen…</label>
       ${c.logo_base64 ? `<button class="btn danger" id="rmlogo">Quitar logo</button>` : ""}</div>
-      <p class="muted">PNG o JPG, máximo 2 MB.</p></div>`;
+      <p class="muted">PNG o JPG, máximo 2 MB.</p></div>
+    <div class="card"><h3>Copias de seguridad</h3>
+      <p class="muted">El servidor guarda una copia automática cada día (las últimas 14). Descarga una copia a tu
+        computador o a Google Drive de vez en cuando: si algo le pasa al servidor, con ese archivo se recupera todo.</p>
+      <button class="btn primary" id="backup">Descargar copia ahora</button>
+      ${backups.length ? `<table class="t" style="margin-top:12px"><thead><tr><th>Copia automática</th><th class="r">Tamaño</th><th></th></tr></thead><tbody>
+        ${backups.map((b, i) => `<tr><td>${esc(fmtDateTime(b.created_at))}</td><td class="r">${(b.size / 1024).toFixed(0)} KB</td>
+          <td class="r"><button class="btn small" data-b="${i}">Descargar</button></td></tr>`).join("")}</tbody></table>`
+        : `<p class="muted" style="margin-top:12px">Todavía no hay copias automáticas; la primera se crea hoy.</p>`}
+    </div>`;
   $("#f", view).onsubmit = async (ev) => {
     ev.preventDefault();
     const d = Object.fromEntries(new FormData(ev.target).entries());
@@ -484,37 +733,142 @@ views.empresa = async (view) => {
   if (rm) rm.onclick = () => confirm("¿Quitar el logo?") && guarded(async () => {
     await api("POST", "api/company/logo", { data_base64: null, mime: null }); toast("Logo eliminado."); go("empresa");
   });
+  $("#backup", view).onclick = (ev) => guarded(async () => {
+    ev.target.disabled = true;
+    try { await downloadBlob("api/backup", `facturador-copia-${new Date().toISOString().slice(0, 10)}.db`, "application/octet-stream"); }
+    finally { ev.target.disabled = false; }
+  });
+  view.querySelectorAll("[data-b]").forEach((b) => b.onclick = () => guarded(() =>
+    downloadBlob(`api/backups/${encodeURIComponent(backups[b.dataset.b].name)}`, backups[b.dataset.b].name, "application/octet-stream")));
+};
+
+// ---------- usuarios (administrador) ----------
+views.usuarios = async (view) => {
+  const users = await api("GET", "api/users");
+  const roleOpts = [{ value: "vendedor", label: "Vendedor — factura, cobra y ve el historial" }, { value: "admin", label: "Administrador — todo, incluido resumen, anular y usuarios" }];
+  view.innerHTML = `<h2>Usuarios</h2>
+    <p class="muted">Cada empleado entra con su propio usuario. Cada factura y cada pago quedan registrados con quién los hizo.</p>
+    ${auth.mode === "key" ? `<div class="note">Entraste con la clave maestra. Crea tu propio usuario administrador y úsalo en el día a día; no compartas la clave maestra.</div>` : ""}
+    <div class="toolbar"><button class="btn primary" id="add">+ Nuevo usuario</button></div>
+    <div class="card"><ul class="list" id="list">${users.length ? users.map((u, i) => `<li class="${u.active ? "" : "voided"}"><div class="main">
+      <div class="title">${esc(u.name)} ${u.role === "admin" ? `<span class="badge admin">Admin</span>` : `<span class="badge">Vendedor</span>`}
+        ${u.active ? "" : `<span class="badge anulada">Desactivado</span>`}</div>
+      <div class="muted">usuario: ${esc(u.username)}</div></div>
+      <div class="actions"><button class="btn small" data-edit="${i}">Editar</button></div></li>`).join("")
+      : `<li class="empty">Aún no hay usuarios.</li>`}</ul></div>`;
+  $("#add", view).onclick = async () => {
+    const data = await openForm("Nuevo usuario", [
+      { name: "name", label: "Nombre completo", required: true },
+      { name: "username", label: "Usuario (para entrar)", required: true, placeholder: "ej. maria",
+        validate: (v) => /\s/.test(v) ? "El usuario no puede tener espacios." : null },
+      { name: "password", label: "Contraseña", type: "password", required: true, autocomplete: "new-password",
+        validate: (v) => v.length >= 6 ? null : "La contraseña debe tener al menos 6 caracteres." },
+      { name: "role", label: "Rol", type: "select", options: roleOpts },
+    ], {}, "Crear usuario");
+    if (data) guarded(async () => { await api("POST", "api/users", data); toast("Usuario creado."); go("usuarios"); });
+  };
+  $("#list", view).onclick = async (ev) => {
+    const i = ev.target.dataset.edit;
+    if (i === undefined) return;
+    const u = users[i];
+    const data = await openForm(`Editar: ${u.username}`, [
+      { name: "name", label: "Nombre completo", required: true },
+      { name: "role", label: "Rol", type: "select", options: roleOpts },
+      { name: "active", label: "Usuario activo (puede entrar)", type: "checkbox" },
+      { name: "password", label: "Nueva contraseña (déjala vacía para no cambiarla)", type: "password", autocomplete: "new-password",
+        validate: (v) => !v || v.length >= 6 ? null : "La contraseña debe tener al menos 6 caracteres." },
+    ], u, "Guardar", `<p class="muted">Al desactivarlo o cambiarle la contraseña, se cierra su sesión en todos sus dispositivos.</p>`);
+    if (!data) return;
+    if (!data.password) delete data.password;
+    guarded(async () => { await api("PUT", `api/users/${u.id}`, data); toast("Usuario actualizado."); go("usuarios"); });
+  };
 };
 
 // ---------- historial ----------
-async function downloadPdf(inv) {
-  const r = await api("GET", `api/invoices/${inv.id}/pdf`, undefined, { raw: true });
-  const blob = await r.blob();
-  const name = `${inv.number}.pdf`;
-  const file = new File([blob], name, { type: "application/pdf" });
-  // En el celular, ofrece compartir (WhatsApp, correo…) si el navegador lo permite.
-  if (navigator.canShare?.({ files: [file] }) && matchMedia("(pointer: coarse)").matches) {
-    try { await navigator.share({ files: [file], title: `Factura ${inv.number}` }); return; }
-    catch (e) { if (e.name === "AbortError") return; }
-  }
-  const url = URL.createObjectURL(blob);
-  const a = Object.assign(document.createElement("a"), { href: url, download: name });
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+let historialFilter = "todas";
+const FILTERS = [["todas", "Todas"], ["por_cobrar", "Por cobrar"], ["pagada", "Pagadas"], ["anulada", "Anuladas"]];
+const matchesFilter = (inv) => historialFilter === "todas" ? true
+  : historialFilter === "por_cobrar" ? ["pendiente", "abono"].includes(inv.payment_status)
+  : inv.payment_status === historialFilter;
+
+async function registerPayment(inv) {
+  const data = await openForm(`Registrar pago · ${inv.number}`, [
+    { name: "amount", label: "Monto recibido", type: "number", required: true, default: inv.payment_tracking ? inv.balance : inv.total,
+      validate: (v) => v > 0 ? null : "El monto debe ser mayor que cero." },
+    { name: "method", label: "Método de pago", type: "select", options: PAYMENT_METHODS.map(([value, label]) => ({ value, label })) },
+    { name: "note", label: "Nota (opcional)", placeholder: "ej. número de transferencia" },
+  ], {}, "Registrar pago", `<p class="muted">${esc(inv.client_name)} · Total ${esc(money(inv.total))}${inv.payment_tracking ? ` · Saldo <b>${esc(money(inv.balance))}</b>` : ""}</p>`);
+  if (!data) return false;
+  return !!(await guarded(async () => { await api("POST", `api/invoices/${inv.id}/payments`, data); toast("Pago registrado."); return true; }));
+}
+
+async function voidInvoice(inv) {
+  const data = await openForm(`Anular ${inv.number}`, [
+    { name: "reason", label: "Motivo de la anulación", required: true, placeholder: "ej. error en el cliente, devolución…" },
+  ], {}, "Anular factura", `<div class="note">La factura queda en el historial marcada como ANULADA (no se borra, para no
+    dejar huecos en la numeración) y el stock de sus artículos vuelve al inventario. No se puede deshacer.</div>`);
+  if (!data) return false;
+  return !!(await guarded(async () => { await api("POST", `api/invoices/${inv.id}/void`, data); toast(`Factura ${inv.number} anulada.`); return true; }));
+}
+
+async function invoiceDetail(id) {
+  const inv = await api("GET", `api/invoices/${id}`);
+  const pays = inv.payments || [];
+  showDialog(`<h2>${esc(inv.number)} ${badge(inv.payment_status)}</h2>
+    <p class="muted" style="margin-top:-8px">${esc(fmtDateTime(inv.created_at))} · ${esc(inv.client_name)}
+      ${inv.user_name ? `<br>Hecha por ${esc(inv.user_name)}` : ""}${inv.seller ? ` · Vendedor: ${esc(inv.seller)}` : ""}</p>
+    ${inv.status === "anulada" ? `<div class="errors">Anulada el ${esc(fmtDateTime(inv.voided_at))}${inv.voided_by ? ` por ${esc(inv.voided_by)}` : ""}: ${esc(inv.void_reason)}</div>` : ""}
+    <table class="t"><thead><tr><th>Artículo</th><th class="r">Cant.</th><th class="r">Total</th></tr></thead><tbody>
+      ${inv.items.map((it) => `<tr><td>${esc(it.description)}${it.discount ? ` <span class="muted">(-${fmtNum(it.discount)}%)</span>` : ""}</td>
+        <td class="r">${fmtNum(it.qty)}</td><td class="r money">${esc(money(it.qty * it.price * (1 - (it.discount || 0) / 100)))}</td></tr>`).join("")}
+    </tbody></table>
+    <div class="totals"><div><span>Total</span><span class="money">${esc(money(inv.total))}</span></div>
+      <div><span>Pagado</span><span class="money">${esc(money(inv.paid))}</span></div>
+      ${inv.payment_tracking ? `<div class="grand"><span>Saldo</span><span class="money">${esc(money(inv.balance))}</span></div>` : ""}</div>
+    <h3>Pagos</h3>
+    ${pays.length ? `<table class="t"><tbody>${pays.map((p) => `<tr><td>${esc(fmtDateTime(p.created_at))}<div class="muted" style="font-size:.8rem">
+      ${esc(METHOD_LABEL[p.method] || p.method)}${p.user_name ? ` · ${esc(p.user_name)}` : ""}${p.note ? ` · ${esc(p.note)}` : ""}</div></td>
+      <td class="r money">${esc(money(p.amount))}</td>
+      ${isAdmin() && inv.status !== "anulada" ? `<td class="r"><button type="button" class="btn small danger" data-delpay="${esc(p.id)}">Quitar</button></td>` : ""}</tr>`).join("")}</tbody></table>`
+      : `<p class="muted">${inv.payment_tracking ? "Sin pagos todavía." : "Esta factura es de antes del registro de pagos."}</p>`}
+    <div class="btns" style="margin-top:14px">
+      <button type="button" class="btn" data-act="pdf">PDF</button>
+      ${inv.status !== "anulada" && inv.payment_status !== "pagada" ? `<button type="button" class="btn good" data-act="pay">Registrar pago</button>` : ""}
+      ${isAdmin() && inv.status !== "anulada" ? `<button type="button" class="btn danger" data-act="void">Anular</button>` : ""}
+      <button class="btn primary" value="close">Cerrar</button></div>`, (form, dlg) => {
+    form.onclick = async (ev) => {
+      const act = ev.target.dataset.act, delpay = ev.target.dataset.delpay;
+      if (act === "pdf") { ev.target.disabled = true; await guarded(() => downloadPdf(inv)); ev.target.disabled = false; }
+      if (act === "pay") { await closeModal(dlg); if (await registerPayment(inv)) go("historial"); }
+      if (act === "void") { await closeModal(dlg); if (await voidInvoice(inv)) go("historial"); }
+      if (delpay && confirm("¿Quitar este pago? Úsalo solo si se registró por error.")) {
+        await guarded(async () => { await api("DELETE", `api/payments/${delpay}`); toast("Pago quitado."); dlg.close(); go("historial"); });
+      }
+    };
+  });
 }
 
 views.historial = async (view) => {
   const invoices = await api("GET", "api/invoices");
+  const pendingTotal = invoices.filter((i) => ["pendiente", "abono"].includes(i.payment_status)).reduce((a, i) => a + i.balance, 0);
   view.innerHTML = `<h2>Historial de facturas</h2>
-    <div class="toolbar"><input type="search" placeholder="Buscar por número o cliente…"></div>
+    <div class="toolbar"><input type="search" placeholder="Buscar por número, cliente o vendedor…"></div>
+    <div class="chips" id="filters">${FILTERS.map(([k, l]) => `<button class="chip ${k === historialFilter ? "active" : ""}" data-f="${k}">${l}</button>`).join("")}</div>
+    ${pendingTotal > 0 ? `<p class="muted">Por cobrar en total: <b class="money">${esc(money(pendingTotal))}</b></p>` : ""}
     <div class="card"><ul class="list" id="list"></ul></div>`;
-  searchable(view, (q) => {
-    const rows = invoices.filter((i) => [i.number, i.client_name, i.client_doc, i.seller].join(" ").toLowerCase().includes(q));
-    $("#list", view).innerHTML = rows.length ? rows.map((inv, i) => `<li><div class="main">
+  let lastQ = "";
+  const render = (q) => {
+    lastQ = q;
+    const rows = invoices.filter(matchesFilter).filter((i) =>
+      [i.number, i.client_name, i.client_doc, i.seller, i.user_name].join(" ").toLowerCase().includes(q));
+    $("#list", view).innerHTML = rows.length ? rows.map((inv, i) => `<li class="${inv.status === "anulada" ? "voided" : ""}"><div class="main">
         <div class="title">${esc(inv.number)} · ${esc(fmtDate(inv.created_at))}</div>
-        <div class="muted">${esc(inv.client_name || "Sin cliente")} · <span class="money">${esc(money(inv.total))}</span></div></div>
+        <div class="muted">${esc(inv.client_name || "Sin cliente")} · <span class="money">${esc(money(inv.total))}</span></div>
+        <div style="margin-top:3px">${badge(inv.payment_status)}${["pendiente", "abono"].includes(inv.payment_status)
+          ? ` <span class="muted" style="font-size:.85rem">saldo <span class="money">${esc(money(inv.balance))}</span></span>` : ""}</div></div>
         <div class="actions"><button class="btn small" data-pdf="${i}">PDF</button>
-        <button class="btn small danger" data-del="${i}">Eliminar</button></div></li>`).join("")
+        ${["pendiente", "abono"].includes(inv.payment_status) ? `<button class="btn small good" data-pay="${i}">Cobrar</button>` : ""}
+        <button class="btn small" data-det="${i}">Detalle</button></div></li>`).join("")
       : `<li class="empty">${invoices.length ? "Sin resultados." : "Aún no hay facturas."}</li>`;
     $("#list", view).onclick = async (ev) => {
       const e = ev.target.dataset;
@@ -523,11 +877,17 @@ views.historial = async (view) => {
         await guarded(() => downloadPdf(rows[e.pdf]));
         ev.target.disabled = false;
       }
-      if (e.del && confirm(`¿Eliminar la factura ${rows[e.del].number}? El stock de sus artículos se devolverá al inventario. No se puede deshacer.`)) {
-        await guarded(async () => { await api("DELETE", `api/invoices/${rows[e.del].id}`); toast("Factura eliminada."); go("historial"); });
-      }
+      if (e.pay && await registerPayment(rows[e.pay])) go("historial");
+      if (e.det) guarded(() => invoiceDetail(rows[e.det].id));
     };
-  });
+  };
+  $("#filters", view).onclick = (ev) => {
+    const f = ev.target.dataset.f; if (!f) return;
+    historialFilter = f;
+    view.querySelectorAll("#filters .chip").forEach((c) => c.classList.toggle("active", c.dataset.f === f));
+    render(lastQ);
+  };
+  searchable(view, render);
 };
 
 // ---------- nueva factura ----------
@@ -536,6 +896,7 @@ views.factura = async (view) => {
   const state = { clientId: "", lines: [] };
   const productById = Object.fromEntries(products.map((p) => [p.id, p]));
   const taxLabel = company.tax_label || "Impuesto";
+  const methodOptions = PAYMENT_METHODS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
 
   view.innerHTML = `<h2>Nueva factura</h2>
     <p class="muted">Los artículos se eligen desde tu catálogo, para llevar el inventario al día.</p>
@@ -553,7 +914,7 @@ views.factura = async (view) => {
     <div class="card">
       <div class="grid2">
         <label class="f"><span>${esc(taxLabel)} (%)</span><input id="tax" type="number" step="any" inputmode="decimal" value="${esc(company.tax_rate ?? 19)}"></label>
-        <label class="f"><span>Vendedor (opcional)</span><input id="seller" placeholder="¿Quién hizo la venta?"></label>
+        <label class="f"><span>Vendedor</span><input id="seller" value="${esc(auth.user.master ? "" : auth.user.name)}" placeholder="¿Quién hizo la venta?"></label>
         <label class="f"><span>Notas (opcional)</span><input id="notes" placeholder="Condiciones de pago, etc."></label>
         <label class="f"><span>Garantía (opcional)</span><input id="warranty" placeholder="ej. 6 meses por defectos de fábrica"></label>
       </div>
@@ -563,8 +924,21 @@ views.factura = async (view) => {
         <div><span>${esc(taxLabel)}</span><span class="money" id="t-tax"></span></div>
         <div class="grand"><span>Total</span><span class="money" id="t-total"></span></div>
       </div>
+      <div class="muted" style="margin-bottom:6px">Forma de pago</div>
+      <div class="seg"><label><input type="radio" name="paymode" value="contado" checked>Pagada ahora</label>
+        <label><input type="radio" name="paymode" value="credito">A crédito</label></div>
+      <div class="grid2">
+        <label class="f"><span>Método de pago</span><select id="paymethod">${methodOptions}</select></label>
+        <label class="f hidden" id="abono-wrap"><span>Abono inicial (opcional)</span><input id="abono" type="number" step="any" inputmode="decimal" placeholder="0"></label>
+      </div>
       <button class="btn primary block" id="generate">Generar factura y descargar PDF</button>
     </div>`;
+
+  let currentTotal = 0;
+  const payMode = () => $("input[name=paymode]:checked", view).value;
+  view.querySelectorAll("input[name=paymode]").forEach((r) => r.onchange = () => {
+    $("#abono-wrap", view).classList.toggle("hidden", payMode() !== "credito");
+  });
 
   const renderClients = () => {
     $("#client", view).innerHTML = `<option value="">— elegir cliente —</option>` + clients.map((c) =>
@@ -604,6 +978,7 @@ views.factura = async (view) => {
       if (el) el.textContent = money(q * p * (1 - d / 100));
     });
     const net = gross - disc, tax = net * (num($("#tax", view).value) || 0) / 100;
+    currentTotal = Math.round((net + tax) * 100) / 100;
     $("#t-gross", view).textContent = money(gross);
     $("#t-disc", view).textContent = disc ? "- " + money(disc) : money(0);
     $("#t-tax", view).textContent = money(tax);
@@ -655,6 +1030,12 @@ views.factura = async (view) => {
     }
     const taxRate = num($("#tax", view).value);
     if (taxRate === null || taxRate < 0 || taxRate > 100) errors.push(`La tarifa de ${taxLabel} debe estar entre 0 y 100.`);
+    const payment = { mode: payMode(), method: $("#paymethod", view).value };
+    if (payment.mode === "credito") {
+      payment.amount = num($("#abono", view).value) ?? 0;
+      if (payment.amount < 0) errors.push("El abono inicial no puede ser negativo.");
+      else if (payment.amount > currentTotal) errors.push("El abono inicial no puede ser mayor que el total.");
+    }
 
     const box = $("#errors", view);
     box.innerHTML = errors.length ? `Revisa lo siguiente:<ul>${errors.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>` : "";
@@ -664,13 +1045,14 @@ views.factura = async (view) => {
     ev.target.disabled = true;
     try {
       const r = await api("POST", "api/invoices", {
-        client_snapshot: client, items, tax_rate: taxRate,
+        client_snapshot: client, items, tax_rate: taxRate, payment,
         notes: $("#notes", view).value.trim(), warranty: $("#warranty", view).value.trim(),
         seller: $("#seller", view).value.trim(),
       });
       toast(`Factura ${r.number} guardada.`);
       try { await downloadPdf(r); }
       catch (e) { toast(`La factura ${r.number} se guardó, pero el PDF falló: ${e.message}. Descárgalo desde Historial.`, true); }
+      historialFilter = "todas";
       go("historial");
     } catch (e) {
       box.innerHTML = esc(e.message); box.classList.remove("hidden");
@@ -683,8 +1065,10 @@ views.factura = async (view) => {
 };
 
 // ---------- arranque ----------
-apiKey = storageGet();
-if (apiKey) startApp().catch(() => { if (apiKey) showLogin("No se pudo conectar con el servidor. Intenta de nuevo."); });
+auth = storageGet();
+try { localStorage.removeItem("facturador_key"); } catch {}  // formato de la versión anterior
+setLoginMode("token");
+if (auth?.secret) startApp().catch(() => { if (auth) showLogin("No se pudo conectar con el servidor. Intenta de nuevo."); });
 else showLogin();
 </script>
 </body>

@@ -132,9 +132,10 @@ class ClientesTab(ctk.CTkFrame):
         ctk.CTkButton(btns, text="Editar", width=70, height=28, fg_color="transparent",
                        border_width=1, border_color="#E1DFD8", text_color=INK_SOFT,
                        hover_color="#F0EEE8", command=lambda: self._edit_client(c)).pack(side="left", padx=4)
-        ctk.CTkButton(btns, text="Eliminar", width=70, height=28, fg_color="transparent",
-                       text_color=RED, hover_color="#F7E9E9",
-                       command=lambda: self._delete_client(c)).pack(side="left", padx=4)
+        if self.app.is_admin:
+            ctk.CTkButton(btns, text="Eliminar", width=70, height=28, fg_color="transparent",
+                           text_color=RED, hover_color="#F7E9E9",
+                           command=lambda: self._delete_client(c)).pack(side="left", padx=4)
 
     def _new_client(self, on_saved=None):
         ClientModal(self.app, on_saved or (lambda c: self.refresh()))

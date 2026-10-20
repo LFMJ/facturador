@@ -8,6 +8,7 @@ from theme import INK, INK_SOFT, BRASS, LINE, RED, FONT_HEAD, FONT_BODY, FONT_BO
 from tab_clientes import ClientModal
 
 PLACEHOLDER_PRODUCT = "— elegir producto —"
+PAYMENT_METHODS = [("efectivo", "Efectivo"), ("transferencia", "Transferencia"), ("tarjeta", "Tarjeta"), ("otro", "Otro")]
 
 
 class ItemRow:
@@ -153,8 +154,9 @@ class FacturaTab(ctk.CTkFrame):
         self.e_tax = ctk.CTkEntry(f1, textvariable=self.tax_var, font=FONT_BODY, height=34)
         self.e_tax.pack(fill="x", pady=(3, 0))
         self.tax_var.trace_add("write", lambda *_: self._recalc())
-        ctk.CTkLabel(f2, text="Vendedor (opcional)", font=FONT_BODY_SM, text_color=INK_SOFT, anchor="w").pack(fill="x")
+        ctk.CTkLabel(f2, text="Vendedor", font=FONT_BODY_SM, text_color=INK_SOFT, anchor="w").pack(fill="x")
         self.e_seller = ctk.CTkEntry(f2, font=FONT_BODY, height=34, placeholder_text="¿Quién hizo la venta?")
+        self._current_total = 0.0
         self.e_seller.pack(fill="x", pady=(3, 0))
 
         # --- notas / garantia ---
@@ -180,8 +182,29 @@ class FacturaTab(ctk.CTkFrame):
         self.l_taxamt = self._totals_row(tin, "Impuesto")
         self.l_total = self._totals_row(tin, "Total", bold=True)
 
+        # --- forma de pago ---
+        ctk.CTkLabel(inner, text="Forma de pago", font=FONT_BODY_SM, text_color=INK_SOFT, anchor="w").pack(fill="x", pady=(10, 3))
+        pay_row = ctk.CTkFrame(inner, fg_color="transparent")
+        pay_row.pack(fill="x")
+        self.pay_mode = ctk.CTkSegmentedButton(pay_row, values=["Pagada ahora", "A crédito"], command=self._on_pay_mode)
+        self.pay_mode.set("Pagada ahora")
+        self.pay_mode.pack(side="left")
+        ctk.CTkLabel(pay_row, text="Método:", font=FONT_BODY_SM, text_color=INK_SOFT).pack(side="left", padx=(16, 4))
+        self.pay_method = ctk.CTkOptionMenu(pay_row, values=[l for _v, l in PAYMENT_METHODS], width=140)
+        self.pay_method.pack(side="left")
+        self.abono_label = ctk.CTkLabel(pay_row, text="Abono inicial:", font=FONT_BODY_SM, text_color=INK_SOFT)
+        self.e_abono = ctk.CTkEntry(pay_row, width=110, placeholder_text="0", font=FONT_BODY, height=32)
+
         ctk.CTkButton(inner, text="Generar factura y guardar PDF", command=self._generate,
                       fg_color=INK, hover_color="#233650", height=40).pack(anchor="w", pady=(16, 4))
+
+    def _on_pay_mode(self, value):
+        if value == "A crédito":
+            self.abono_label.pack(side="left", padx=(16, 4))
+            self.e_abono.pack(side="left")
+        else:
+            self.abono_label.pack_forget()
+            self.e_abono.pack_forget()
 
     def _totals_row(self, parent, label, bold=False):
         row = ctk.CTkFrame(parent, fg_color="transparent")
@@ -207,6 +230,7 @@ class FacturaTab(ctk.CTkFrame):
         self.tax_label_widget.configure(text=f'{company.get("tax_label") or "Impuesto"} (%)')
         if not self.rows:
             self.tax_var.set(str(company.get("tax_rate", 19)))
+            self._reset_seller()
             self.add_row()
         else:
             for row in self.rows:
@@ -217,6 +241,11 @@ class FacturaTab(ctk.CTkFrame):
         self.client_menu.configure(values=labels)
 
         self._recalc()
+
+    def _reset_seller(self):
+        self.e_seller.delete(0, "end")
+        if not self.app.user.get("master"):
+            self.e_seller.insert(0, self.app.user.get("name", ""))
 
     # ---------- cliente ----------
     def _on_pick_client(self, label):
@@ -286,6 +315,7 @@ class FacturaTab(ctk.CTkFrame):
             tax_rate = 0.0
         tax_amt = net * (tax_rate / 100)
         total = net + tax_amt
+        self._current_total = round(total, 2)
         self.l_gross.configure(text=fmt_money(gross, currency))
         self.l_discount.configure(text=("- " + fmt_money(discount_total, currency)) if discount_total else fmt_money(0, currency))
         self.l_taxamt.configure(text=fmt_money(tax_amt, currency))
@@ -331,6 +361,19 @@ class FacturaTab(ctk.CTkFrame):
             tax_rate = None
             errors.append(f'La tarifa de {self.company.get("tax_label","impuesto")} debe ser un número entre 0 y 100.')
 
+        payment = {"mode": "credito" if self.pay_mode.get() == "A crédito" else "contado",
+                   "method": dict((l, v) for v, l in PAYMENT_METHODS)[self.pay_method.get()]}
+        if payment["mode"] == "credito":
+            raw = self.e_abono.get().strip().replace(",", ".")
+            try:
+                payment["amount"] = float(raw) if raw else 0.0
+                if payment["amount"] < 0:
+                    raise ValueError
+                if payment["amount"] > self._current_total + 0.004:
+                    errors.append("El abono inicial no puede ser mayor que el total de la factura.")
+            except ValueError:
+                errors.append("El abono inicial debe ser un número igual o mayor que cero (o déjalo vacío).")
+
         self._set_errors(errors)
         if errors:
             self.app.show_toast("Hay datos por corregir antes de generar la factura.", error=True)
@@ -345,7 +388,7 @@ class FacturaTab(ctk.CTkFrame):
             invoice_id, number = db.create_invoice(
                 self.app.server, self.selected_client, valid_items, tax_rate,
                 notes=self.e_notes.get().strip(), warranty=self.e_warranty.get().strip(),
-                seller=self.e_seller.get().strip(),
+                seller=self.e_seller.get().strip(), payment=payment,
             )
         except db.DBError as e:
             messagebox.showerror("No se pudo guardar la factura", str(e))
@@ -380,7 +423,10 @@ class FacturaTab(ctk.CTkFrame):
         self._render_client_info()
         self.e_notes.delete(0, "end")
         self.e_warranty.delete(0, "end")
-        self.e_seller.delete(0, "end")
+        self._reset_seller()
+        self.pay_mode.set("Pagada ahora")
+        self._on_pay_mode("Pagada ahora")
+        self.e_abono.delete(0, "end")
         self.add_row()
         self._set_errors([])
         self.app.go_to("historial")

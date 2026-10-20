@@ -179,8 +179,10 @@ class ProductosTab(ctk.CTkFrame):
         ctk.CTkLabel(left, text="Productos e inventario", font=FONT_HEAD, text_color=INK, anchor="w").pack(fill="x")
         ctk.CTkLabel(left, text="Tu catálogo, con existencias y proveedor de cada artículo.",
                      font=FONT_BODY_SM, text_color=INK_SOFT, anchor="w").pack(fill="x")
-        ctk.CTkButton(head, text="+ Nuevo producto", command=self._new_product,
-                      fg_color=BRASS, hover_color="#7C5F2C", text_color="#211804").pack(side="right")
+        self.new_btn = ctk.CTkButton(head, text="+ Nuevo producto", command=self._new_product,
+                                     fg_color=BRASS, hover_color="#7C5F2C", text_color="#211804")
+        if self.app.is_admin:
+            self.new_btn.pack(side="right")
 
         self.list_card = ctk.CTkFrame(self, fg_color="white", border_width=1, border_color=LINE, corner_radius=8)
         self.list_card.pack(fill="both", expand=True, pady=(16, 0))
@@ -190,7 +192,7 @@ class ProductosTab(ctk.CTkFrame):
             w.destroy()
         try:
             company = db.get_company(self.app.server)
-            self.suppliers = db.list_suppliers(self.app.server)
+            self.suppliers = db.list_suppliers(self.app.server) if self.app.is_admin else []
             products = db.list_products(self.app.server)
         except db.DBError as e:
             ctk.CTkLabel(self.list_card, text=str(e), text_color=RED, wraplength=500,
@@ -216,6 +218,8 @@ class ProductosTab(ctk.CTkFrame):
         if p.get("supplier_name"):
             meta += f'   ·   Proveedor: {p["supplier_name"]}'
         ctk.CTkLabel(info, text=meta, font=FONT_BODY_SM, text_color=stock_color, anchor="w").pack(fill="x")
+        if not self.app.is_admin:
+            return  # el vendedor solo consulta precios y existencias
         btns = ctk.CTkFrame(row, fg_color="transparent")
         btns.pack(side="right")
         ctk.CTkButton(btns, text="Reabastecer", width=90, height=28, fg_color="transparent",
