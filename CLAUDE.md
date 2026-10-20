@@ -32,7 +32,10 @@ su código está en el historial de git (commit `abf58e9`) por si se vuelve a in
 - Los artículos de una factura se eligen **siempre desde el catálogo** (`product_id`), nunca texto libre.
 - Al facturar se descuenta stock (sumando líneas repetidas del mismo producto); si no alcanza responde 400.
 - Las facturas **no se borran**: se anulan (`status='anulada'`) y se restaura el stock no devuelto antes.
-  `DELETE /api/invoices/<id>` también anula (compatibilidad con apps viejas).
+  Si el cliente había pagado, se registra un pago **negativo** por el neto pagado, con la fecha de la anulación
+  (así la caja de ese día descuenta el dinero y la del día de la venta no cambia). Igual al anular una compra
+  pagada (`supplier_payments` negativo = el proveedor devuelve). `_fix_voided_without_refund()` corrige al
+  arrancar los registros anulados antes de esta regla. `DELETE /api/invoices/<id>` también anula.
 - **Devoluciones parciales** (`returns` / `return_items`): suben el stock y bajan el total de la factura
   (`total` = facturado − devuelto; `original_total` = facturado). Si el cliente ya había pagado más que el
   nuevo total, se registra un pago **negativo** (dinero devuelto).
@@ -41,8 +44,8 @@ su código está en el historial de git (commit `abf58e9`) por si se vuelve a in
 - **Compras** (`purchases`): suman stock y recalculan `products.cost_price` con promedio ponderado. Pagos al
   proveedor en `supplier_payments`. Anular una compra exige que el stock alcance para restarla.
 - `invoice_items.unit_cost` guarda el costo al vender (para la ganancia). Costo y ganancia solo los ve el admin.
-- **Cierre de caja**: esperado por método = cobros − dinero devuelto − pagos a proveedores − gastos (+ base en
-  efectivo), filtrado por `user_id`. Un cierre por día y por persona (o "todos"). El vendedor solo ve su caja.
+- **Cierre de caja**: esperado por método = cobros − dinero devuelto a clientes − pagos a proveedores + dinero
+  devuelto por proveedores − gastos (+ base en efectivo), filtrado por `user_id`. Un cierre por día y por persona (o "todos"). El vendedor solo ve su caja.
 - Descuento por línea en %, antes del impuesto. Numeración `FAC-0001` y `COM-0001` en `company`.
 - Columnas nuevas se agregan a `MIGRATIONS` en `server/app.py` (ALTER TABLE idempotente) para no romper la
   base desplegada. No cambies el esquema sin añadir su migración.

@@ -214,8 +214,38 @@ def init_db():
              SELECT c.id FROM clients c WHERE c.name = invoices.client_name
                AND COALESCE(c.doc, '') = COALESCE(invoices.client_doc, '') LIMIT 1)
            WHERE client_id IS NULL""")
+    _fix_voided_without_refund(conn)
     conn.commit()
     conn.close()
+
+
+def _fix_voided_without_refund(conn):
+    """Antes, anular una factura (o compra) pagada no registraba la devolución del dinero y la caja lo
+    seguía contando. Se registra ahora, con la fecha de la anulación. Es idempotente: tras el ajuste el
+    neto pagado queda en cero y no se vuelve a aplicar."""
+    fixes = [("invoices", "payments", "invoice_id", "factura", "Dinero devuelto al anular la factura (ajuste automático)"),
+             ("purchases", "supplier_payments", "purchase_id", "compra",
+              "Dinero devuelto por el proveedor al anular la compra (ajuste automático)")]
+    for table, pay_table, key, entity, note in fixes:
+        rows = conn.execute(
+            f"""SELECT t.id, t.number, t.voided_at, t.created_at,
+                  (SELECT SUM(amount) FROM {pay_table} WHERE {key} = t.id) AS paid,
+                  (SELECT method FROM {pay_table} WHERE {key} = t.id AND amount > 0 ORDER BY amount DESC LIMIT 1) AS method
+                FROM {table} t WHERE t.status = 'anulada'""").fetchall()
+        for r in rows:
+            paid = round(r[4] or 0, 2)
+            if paid <= 0.004:
+                continue
+            when = r[2] or r[3] or time.time()
+            conn.execute(
+                f"""INSERT INTO {pay_table} (id, {key}, amount, method, note, created_at, user_id, user_name)
+                    VALUES (?,?,?,?,?,?,NULL,'Ajuste automático')""",
+                (str(uuid.uuid4()), r[0], -paid, r[5] or "efectivo", note, when))
+            conn.execute(
+                "INSERT INTO activity_log (created_at, user_id, user_name, entity, entity_id, summary) VALUES (?,NULL,?,?,?,?)",
+                (time.time(), "Ajuste automático", entity, r[0],
+                 f"Registró la devolución de {paid:,.2f} ({r[5] or 'efectivo'}) de la {entity} anulada {r[1]}, "
+                 "que antes seguía contando en la caja"))
 
 
 init_db()
@@ -1067,7 +1097,16 @@ def invoice_pdf(iid):
     return send_file(buf, mimetype="application/pdf", download_name=f'{inv["number"]}.pdf')
 
 
-def _void_invoice(iid, reason):
+def _refund_method(conn, table, key, iid, chosen):
+    """Método para devolver el dinero: el elegido, o el del pago más grande que se recibió."""
+    if chosen:
+        return parse_method(chosen)
+    row = conn.execute(f"SELECT method FROM {table} WHERE {key}=? AND amount > 0 ORDER BY amount DESC LIMIT 1",
+                       (iid,)).fetchone()
+    return row["method"] if row else "efectivo"
+
+
+def _void_invoice(iid, reason, refund_method=None):
     reason = (reason or "").strip()
     if not reason:
         raise ApiError("Escribe el motivo de la anulación.")
@@ -1089,16 +1128,29 @@ def _void_invoice(iid, reason):
                 conn.execute(
                     "INSERT INTO stock_movements (product_id, change_qty, reason, reference, created_at) VALUES (?,?,?,?,?)",
                     (it["product_id"], qty, "anulación factura", inv["number"], now))
+        # Lo que el cliente ya había pagado se le devuelve: queda como un pago negativo con la fecha de hoy,
+        # para que la caja del día descuente ese dinero (y la del día de la venta no cambie).
+        paid = money(conn.execute("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id=?", (iid,)).fetchone()[0])
+        refund_text = ""
+        if paid > 0.004:
+            method = _refund_method(conn, "payments", "invoice_id", iid, refund_method)
+            conn.execute(
+                """INSERT INTO payments (id, invoice_id, amount, method, note, created_at, user_id, user_name)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (str(uuid.uuid4()), iid, -paid, method, "Dinero devuelto al anular la factura", now,
+                 g.user["id"], g.user["name"]))
+            refund_text = f"; se devolvieron {fmt(paid)} ({method}) al cliente"
         conn.execute("UPDATE invoices SET status='anulada', voided_at=?, voided_by=?, void_reason=? WHERE id=?",
                      (now, g.user["name"], reason, iid))
-        log(conn, "factura", iid, f'Anuló la factura {inv["number"]} ({inv["client_name"]}): {reason}')
-    return jsonify({"ok": True})
+        log(conn, "factura", iid, f'Anuló la factura {inv["number"]} ({inv["client_name"]}): {reason}{refund_text}')
+    return jsonify({"ok": True, "refund": paid if paid > 0.004 else 0})
 
 
 @app.post("/api/invoices/<iid>/void")
 @require_auth(admin=True)
 def void_invoice(iid):
-    return _void_invoice(iid, body().get("reason"))
+    d = body()
+    return _void_invoice(iid, d.get("reason"), d.get("refund_method"))
 
 
 @app.delete("/api/invoices/<iid>")
@@ -1361,7 +1413,8 @@ def add_supplier_payment(pid):
 @app.post("/api/purchases/<pid>/void")
 @require_auth(admin=True)
 def void_purchase(pid):
-    reason = text(body(), "reason")
+    d = body()
+    reason = text(d, "reason")
     if not reason:
         raise ApiError("Escribe el motivo de la anulación.")
     with get_conn() as conn:
@@ -1379,9 +1432,18 @@ def void_purchase(pid):
             conn.execute(
                 "INSERT INTO stock_movements (product_id, change_qty, reason, reference, created_at) VALUES (?,?,?,?,?)",
                 (it["product_id"], -it["qty"], "anulación compra", p["number"], now))
+        refund_text = ""
+        if p["paid"] > 0.004:
+            method = _refund_method(conn, "supplier_payments", "purchase_id", pid, d.get("refund_method"))
+            conn.execute(
+                """INSERT INTO supplier_payments (id, purchase_id, amount, method, note, created_at, user_id, user_name)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (str(uuid.uuid4()), pid, -p["paid"], method, "Dinero devuelto por el proveedor al anular la compra", now,
+                 g.user["id"], g.user["name"]))
+            refund_text = f'; el proveedor devolvió {fmt(p["paid"])} ({method})'
         conn.execute("UPDATE purchases SET status='anulada', voided_at=?, voided_by=?, void_reason=? WHERE id=?",
                      (now, g.user["name"], reason, pid))
-        log(conn, "compra", pid, f'Anuló la compra {p["number"]} ({p["supplier_name"]}): {reason}')
+        log(conn, "compra", pid, f'Anuló la compra {p["number"]} ({p["supplier_name"]}): {reason}{refund_text}')
     return jsonify({"ok": True})
 
 
@@ -1464,13 +1526,15 @@ def _cash_summary(conn, day, tz, scope_uid):
     refunded = sums(f"""SELECT p.method, -SUM(p.amount) AS amount FROM payments p
                         WHERE p.created_at >= ? AND p.created_at < ? AND p.amount < 0 {flt} GROUP BY p.method""")
     supplier = sums(f"""SELECT p.method, SUM(p.amount) AS amount FROM supplier_payments p
-                        WHERE p.created_at >= ? AND p.created_at < ? {flt} GROUP BY p.method""")
+                        WHERE p.created_at >= ? AND p.created_at < ? AND p.amount > 0 {flt} GROUP BY p.method""")
+    supplier_back = sums(f"""SELECT p.method, -SUM(p.amount) AS amount FROM supplier_payments p
+                        WHERE p.created_at >= ? AND p.created_at < ? AND p.amount < 0 {flt} GROUP BY p.method""")
     expenses = sums(f"""SELECT p.method, SUM(p.amount) AS amount FROM expenses p
                         WHERE p.spent_at >= ? AND p.spent_at < ? {flt} GROUP BY p.method""")
-    expected = {m: money(received.get(m, 0) - refunded.get(m, 0) - supplier.get(m, 0) - expenses.get(m, 0))
-                for m in PAYMENT_METHODS}
-    return {"received": received, "refunded": refunded, "supplier_payments": supplier, "expenses": expenses,
-            "expected": expected}
+    expected = {m: money(received.get(m, 0) - refunded.get(m, 0) - supplier.get(m, 0) + supplier_back.get(m, 0)
+                         - expenses.get(m, 0)) for m in PAYMENT_METHODS}
+    return {"received": received, "refunded": refunded, "supplier_payments": supplier, "supplier_refunds": supplier_back,
+            "expenses": expenses, "expected": expected}
 
 
 @app.get("/api/cash")
@@ -1601,9 +1665,9 @@ def dashboard():
                 JOIN returns r ON r.id = ri.return_id JOIN invoices i ON i.id = r.invoice_id
                 WHERE r.created_at >= ? AND r.created_at < ? AND {active}""", (start, end)).fetchall()
         payments = conn.execute(
-            f"""SELECT p.method, SUM(p.amount) AS amount FROM payments p JOIN invoices i ON i.id = p.invoice_id
-               WHERE p.created_at >= ? AND p.created_at < ? AND {active}
-               GROUP BY p.method ORDER BY amount DESC""", (start, end)).fetchall()
+            """SELECT p.method, SUM(p.amount) AS amount FROM payments p
+               WHERE p.created_at >= ? AND p.created_at < ?
+               GROUP BY p.method HAVING ABS(SUM(p.amount)) > 0.004 ORDER BY amount DESC""", (start, end)).fetchall()
         receivables = [r for r in _invoice_rows(conn, f"WHERE {active} AND i.payment_tracking = 1", order="ORDER BY i.created_at")
                        if r["balance"] > 0.004]
         expenses = conn.execute(

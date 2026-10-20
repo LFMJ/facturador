@@ -877,8 +877,12 @@ async function purchaseDetail(id) {
       }
       if (act === "void") {
         await closeModal(dlg);
-        const data = await openForm(`Anular ${p.number}`, [{ name: "reason", label: "Motivo", required: true }], {}, "Anular compra",
-          `<div class="note">Se resta del inventario lo que entró con esta compra. El costo promedio de los productos no se recalcula.</div>`);
+        const data = await openForm(`Anular ${p.number}`, [{ name: "reason", label: "Motivo", required: true },
+          ...(p.paid > 0 ? [{ name: "refund_method", label: `¿Cómo te devuelve el proveedor los ${money(p.paid)}?`, type: "select",
+            options: PAYMENT_METHODS.map(([value, label]) => ({ value, label })), default: (p.payments.find((x) => x.amount > 0) || {}).method }] : [])],
+          {}, "Anular compra",
+          `<div class="note">Se resta del inventario lo que entró con esta compra. El costo promedio de los productos no se recalcula.</div>
+          ${p.paid > 0 ? `<div class="note">Ya le pagaste <b>${esc(money(p.paid))}</b>: queda registrado como dinero que te devuelve hoy y suma en el cierre de caja.</div>` : ""}`);
         if (data) await guarded(async () => { await api("POST", `api/purchases/${p.id}/void`, data); toast("Compra anulada."); });
         go("compras");
       }
@@ -1070,7 +1074,7 @@ views.caja = async (view) => {
     api("GET", `api/cash?day=${cajaDay}&tz=${tz}&user_id=${encodeURIComponent(cajaUser)}`),
     admin ? api("GET", "api/users") : [], api("GET", "api/cash/closings")]);
   const rows = [["received", "Cobros de facturas", 1], ["refunded", "Dinero devuelto a clientes", -1],
-    ["supplier_payments", "Pagos a proveedores", -1], ["expenses", "Gastos", -1]];
+    ["supplier_payments", "Pagos a proveedores", -1], ["supplier_refunds", "Devuelto por proveedores", 1], ["expenses", "Gastos", -1]];
   const cell = (obj, m, sign) => { const v = obj[m] || 0; return v ? `${sign < 0 ? "−" : ""}${esc(money(v))}` : "—"; };
   const closed = c.closing;
   // En el celular no caben 4 columnas: solo se muestran los métodos que tuvieron movimiento (efectivo siempre).
@@ -1316,10 +1320,14 @@ async function registerPayment(inv) {
 }
 
 async function voidInvoice(inv) {
+  const paid = inv.paid || 0;
   const data = await openForm(`Anular ${inv.number}`, [
     { name: "reason", label: "Motivo de la anulación", required: true, placeholder: "ej. error en el cliente…" },
+    ...(paid > 0 ? [{ name: "refund_method", label: `¿Cómo se le devuelven los ${money(paid)} al cliente?`, type: "select",
+      options: PAYMENT_METHODS.map(([value, label]) => ({ value, label })), default: (inv.payments?.find((x) => x.amount > 0) || {}).method }] : []),
   ], {}, "Anular factura", `<div class="note">La factura queda en el historial marcada como ANULADA (no se borra, para no
-    dejar huecos en la numeración) y el stock de sus artículos vuelve al inventario. Si solo devuelven algunos artículos, usa <b>Devolución</b>. No se puede deshacer.</div>`);
+    dejar huecos en la numeración) y el stock de sus artículos vuelve al inventario. Si solo devuelven algunos artículos, usa <b>Devolución</b>. No se puede deshacer.</div>
+    ${paid > 0 ? `<div class="note">El cliente ya pagó <b>${esc(money(paid))}</b>: queda registrado como dinero devuelto hoy y se descuenta en el cierre de caja.</div>` : ""}`);
   if (!data) return false;
   return !!(await guarded(async () => { await api("POST", `api/invoices/${inv.id}/void`, data); toast(`Factura ${inv.number} anulada.`); return true; }));
 }
