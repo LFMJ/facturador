@@ -42,12 +42,24 @@ def _t(value) -> str:
     return escape(str(value or ""))
 
 
-def fmt_money(value, currency="$"):
+def fmt_cop(value) -> str:
+    """Número al estilo colombiano: 245.000 (punto de miles), con ",50" solo si hay centavos."""
     try:
         value = float(value)
     except (TypeError, ValueError):
         value = 0.0
-    return f"{currency} {value:,.2f}"
+    cents = round(abs(value) * 100)
+    txt = f"{cents // 100:,}".replace(",", ".")
+    if cents % 100:
+        txt += f",{cents % 100:02d}"
+    return ("-" if value < 0 and cents else "") + txt
+
+
+def fmt_money(value, currency="$"):
+    """$ 245.000 / -$ 759.000 (formato colombiano)."""
+    txt = fmt_cop(value)
+    neg = txt.startswith("-")
+    return f"{'-' if neg else ''}{currency} {txt.lstrip('-')}"
 
 
 MESES_ES = [

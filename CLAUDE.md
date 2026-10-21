@@ -14,6 +14,13 @@ su código está en el historial de git (commit `abf58e9`) por si se vuelve a in
   `views.<pestaña>` por pestaña; `ALL_TABS` define cuáles ve cada rol. Todo texto del usuario va por `esc()`
   antes de `innerHTML`. Diálogos con `openForm()` (formularios) y `showDialog()` (contenido libre); para
   encadenar un diálogo tras otro usar `await closeModal(dlg)`, no `dlg.close()`.
+- **Interfaz**: dinero siempre con `money()` (web) / `fmt_money()` y `fmt()` (servidor/PDF), en formato colombiano:
+  `$ 245.000`, `-$ 759.000`, centavos con coma solo si los hay. En el celular (< 760 px) la navegación es la barra
+  inferior (`BOTTOM_TABS` + "Más"); en el computador, las pestañas de arriba. Accesibilidad (WCAG 2.1 AA, revisada
+  con axe-core sin hallazgos): todo campo con `<label>` o `aria-label`, bordes de campos/botones con `--field`
+  (contraste ≥ 3:1), texto gris con `--muted` (≥ 4.5:1), objetivos táctiles ≥ 44 px, cajas de error con
+  `role="alert"`, opciones tipo segmento como radios en `<fieldset>` (alcanzables con teclado), sin `display:none`
+  en controles que deban recibir foco.
 - **`server/pdf_gen.py`**: PDF de factura y de estado de cuenta (reportlab). Todo texto del usuario pasa por
   `_t()` (escape), porque `Paragraph` interpreta `<`, `>` y `&` como marcado. Fechas con `format_date_es`
   (no `strftime('%B')`, sale en inglés).

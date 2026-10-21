@@ -43,7 +43,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 SERVER_DIR = Path(__file__).parent
 if str(SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(SERVER_DIR))
-from pdf_gen import generate_invoice_pdf, generate_statement_pdf  # noqa: E402
+from pdf_gen import fmt_cop, generate_invoice_pdf, generate_statement_pdf  # noqa: E402
 
 # -------- configuración --------
 API_KEY = os.environ.get("FACTURADOR_API_KEY", "cambia-esta-clave")
@@ -290,7 +290,7 @@ def money(x):
 
 
 def fmt(x):
-    return f"{money(x):,.2f}"
+    return fmt_cop(money(x))
 
 
 def num(value, field, minimum=None, maximum=None, default=None):
@@ -844,7 +844,7 @@ def update_product(pid):
             prev = old[field]
             if isinstance(new, float):
                 if abs((prev or 0) - new) > 1e-9:
-                    changes.append(f"{labels[field]} {prev or 0:,.2f} → {new:,.2f}" if field != "stock_qty"
+                    changes.append(f"{labels[field]} {fmt(prev or 0)} → {fmt(new)}" if field != "stock_qty"
                                    else f"stock {prev or 0:g} → {new:g}")
             elif (prev or "") != (new or ""):
                 changes.append(f"{labels[field]} cambiado" if field == "supplier_id"
