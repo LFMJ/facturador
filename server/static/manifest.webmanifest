@@ -3,7 +3,7 @@
   "short_name": "Facturador",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#FDFCFA",
-  "theme_color": "#16233A",
+  "background_color": "#F2F3EF",
+  "theme_color": "#10251B",
   "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
 }

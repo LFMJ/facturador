@@ -3,186 +3,305 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#16233A">
+<meta name="theme-color" content="#10251B">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap">
 <title>Facturador</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon.svg">
 <style>
   :root {
-    --ink: #16233A; --ink-soft: #3C4A5E; --muted: #626C7C; --paper: #FDFCFA; --panel: #F5F4F0;
+    --ink: #17211C; --ink-soft: #3C4741; --muted: #56625B; --paper: #F2F3EF; --panel: #F2F5F0; --card: #fff;
     /* borde de campos y botones: contraste >= 3:1 con el fondo (WCAG 1.4.11) */
-    --field: #8E8A80; --nav-h: 64px;
-    --line: #E1DFD8; --brass: #7C5F2C; --gold: #C9A45C; --red: #A23B3B; --green: #2F6F4E; --amber: #8A5A00;
-    --card: #fff; --bar: #2B4C7E; --bar-hover: #16233A;
+    --field: #7E8A82; --nav-h: 64px; --side-w: 248px;
+    --line: #DCE0DA; --line-soft: #ECEFEA; --track: #E4E8E2;
+    --forest: #10251B; --forest-2: #183427; --forest-line: #2C4A3B; --mint: #CFE3D6; --mint-soft: #E3EEE7; --sage: #9FB8A9;
+    --green: #1E5B42; --red: #A3352B; --amber: #8A5A00; --brass: #6E4A0E;
+    --bar: #1E5B42; --bar-hover: #10251B;
+    --sans: Manrope, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--paper); color: var(--ink);
-    font: 16px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.45 var(--sans); }
   button, input, select, textarea { font: inherit; color: inherit; }
-  h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; margin: 0; }
+  h1, h2, h3 { margin: 0; font-weight: 800; letter-spacing: -.01em; }
   h2 { font-size: 1.35rem; }
-  h3 { font-size: 1.05rem; margin-bottom: 10px; }
-  .muted { color: var(--ink-soft); font-size: .9rem; }
+  h3 { font-size: 1.05rem; margin-bottom: 12px; }
+  a { color: var(--green); }
+  .muted { color: var(--muted); font-size: .9rem; }
   .hidden { display: none !important; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  :focus-visible { outline: 3px solid var(--green); outline-offset: 2px; }
+  .eyebrow { font-size: .75rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  #view > .eyebrow + h2 { font-size: 2rem; letter-spacing: -.02em; margin: 4px 0 6px; }
+  #view > h2 + .muted { font-size: .95rem; margin: 0 0 16px; max-width: 620px; }
 
-  header.top { position: sticky; top: 0; z-index: 10; background: var(--ink); color: #fff;
-    padding: calc(10px + env(safe-area-inset-top)) 16px 0; }
-  header.top .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  header.top h1 { font-size: 1.2rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  header.top .who { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
-  header.top .who button { background: transparent; border: 1px solid #ffffff55; color: #fff;
-    border-radius: 6px; padding: 4px 10px; font-size: .85rem; cursor: pointer; max-width: 160px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  nav.tabs { display: flex; gap: 4px; overflow-x: auto; margin-top: 8px; scrollbar-width: none; }
-  nav.tabs::-webkit-scrollbar { display: none; }
-  nav.tabs button { flex: 0 0 auto; background: transparent; border: 0; color: #ffffffb0;
-    padding: 10px 12px; border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; }
-  nav.tabs button.active { color: #fff; border-bottom-color: var(--gold); font-weight: 600; }
+  /* ----- marca y menú lateral ----- */
+  .logo { flex: none; width: 36px; height: 36px; border-radius: 9px; background: var(--mint); color: var(--forest);
+    display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: .875rem; }
+  .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .brand .bn { display: flex; flex-direction: column; min-width: 0; }
+  .brand h1 { font-size: 1rem; font-weight: 700; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .brand .sub { font-size: .75rem; color: var(--sage); }
+  header.top { background: var(--forest); color: #E7EEE9; z-index: 10; }
+  header.top .who { display: flex; gap: 8px; align-items: center; min-width: 0; }
+  header.top .who button { background: transparent; border: 1px solid #5F8A73; color: #E7EEE9; border-radius: 8px;
+    padding: 0 12px; min-height: 36px; font-size: .85rem; font-weight: 600; cursor: pointer; }
+  header.top #me { border: 0; padding: 0 4px; text-align: left; display: flex; flex-direction: column; justify-content: center; min-width: 0; flex: 1; }
+  header.top #me .nm { font-weight: 700; font-size: .875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  header.top #me .rl { font-size: .75rem; font-weight: 500; color: var(--sage); }
+  .avatar { flex: none; width: 32px; height: 32px; border-radius: 50%; background: #2C5A44; display: inline-flex; align-items: center;
+    justify-content: center; font-weight: 700; font-size: .8rem; }
+  nav.tabs .grp { display: flex; flex-direction: column; gap: 4px; }
+  nav.tabs .grp + .grp { margin-top: 18px; }
+  nav.tabs .grp-l { font-size: .6875rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: #8FA89A; padding: 0 12px 6px; }
+  nav.tabs button { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 12px; border-radius: 10px; border: 0;
+    background: transparent; color: #D3DED7; font-size: .875rem; font-weight: 500; cursor: pointer; text-align: left; width: 100%; }
+  nav.tabs button svg { width: 18px; height: 18px; flex: none; }
+  nav.tabs button:hover { background: var(--forest-2); color: #fff; }
+  nav.tabs button.active { background: var(--mint); color: var(--forest); font-weight: 700; }
+  nav.tabs button:focus-visible { outline-color: var(--mint); }
 
-  main { max-width: 900px; margin: 0 auto; padding: 16px 16px 96px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
-  .toolbar { display: flex; gap: 8px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
-  .toolbar input[type=search] { flex: 1 1 180px; }
-  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 12px; }
-  .chip { border: 1px solid var(--field); background: #fff; min-height: 40px; border-radius: 99px; padding: 6px 12px; cursor: pointer; font-size: .9rem; }
-  .chip.active { background: var(--ink); border-color: var(--ink); color: #fff; }
+  #view { max-width: 1080px; margin: 0 auto; padding: 36px 40px 64px; }
+  @media (min-width: 760px) {
+    #app { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); min-height: 100vh; }
+    header.top { position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; padding: 22px 16px; }
+    header.top .brand { padding: 0 8px; }
+    header.top .who { margin-top: auto; padding: 12px; border-radius: 12px; background: var(--forest-2); }
+    nav.bottom { display: none; }
+  }
 
-  label.f { display: block; margin-bottom: 12px; }
-  label.f > span { display: block; font-size: .85rem; color: var(--ink-soft); margin-bottom: 4px; }
-  input, select, textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--field); border-radius: 8px;
-    background: #fff; min-height: 44px; }
-  input[type=checkbox] { width: auto; min-height: 0; }
-  input:focus, select:focus, textarea:focus { outline: 2px solid #C9A45C66; border-color: var(--gold); }
+  /* ----- tarjetas y controles ----- */
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 24px; margin-bottom: 16px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin: 14px 0; flex-wrap: wrap; }
+  .toolbar input[type=search] { flex: 1 1 260px; }
+  input[type=search] { padding-left: 42px; background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%2356625B' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M11 18a7 7 0 1 0 0-14a7 7 0 0 0 0 14M20 20l-4-4'/%3E%3C/svg%3E") no-repeat 14px center; }
+  .chips { display: inline-flex; gap: 4px; flex-wrap: wrap; padding: 4px; background: var(--track); border-radius: 12px; margin: 4px 0 16px; max-width: 100%; }
+  .chip { border: 0; background: transparent; min-height: 40px; border-radius: 9px; padding: 0 14px; cursor: pointer; font-size: .875rem; font-weight: 500; color: var(--ink-soft); white-space: nowrap; }
+  .chip:hover { color: var(--forest); }
+  .chip.active { background: #fff; color: var(--forest); font-weight: 700; box-shadow: 0 1px 2px #10251b1f; }
+
+  label.f { display: block; margin-bottom: 14px; }
+  label.f > span { display: block; font-size: .8125rem; font-weight: 600; color: var(--ink-soft); margin-bottom: 6px; }
+  input, select, textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--field); border-radius: 10px; background: #fff; min-height: 44px; }
+  input[type=number], input[type=date], input[type=month] { font-family: var(--mono); }
+  input[type=checkbox] { width: auto; min-height: 0; accent-color: var(--green); }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--green); outline-offset: 0; border-color: var(--green); }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
   @media (max-width: 560px) { .grid2 { grid-template-columns: 1fr; } }
 
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px;
-    padding: 0 16px; border-radius: 8px; border: 1px solid var(--field); background: #fff; cursor: pointer; text-decoration: none; }
-  .btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; font-weight: 600; }
-  .btn.danger { color: var(--red); border-color: #E7C3BE; }
-  .btn.good { color: var(--green); border-color: #BFD8C9; }
-  .btn.small { min-height: 36px; padding: 0 12px; font-size: .9rem; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 16px; border-radius: 10px;
+    border: 1px solid var(--field); background: #fff; color: var(--ink); cursor: pointer; text-decoration: none; font-size: .875rem; font-weight: 600; }
+  .btn:hover { border-color: var(--ink-soft); }
+  .btn.primary { background: var(--green); border-color: var(--green); color: #fff; font-weight: 700; }
+  .btn.primary:hover { background: var(--forest); border-color: var(--forest); }
+  .btn.danger { color: var(--red); border-color: #C98A82; }
+  .btn.good { color: var(--green); border-color: #7FB094; background: #EEF6F0; }
+  .btn.small { min-height: 36px; padding: 0 12px; font-size: .8125rem; border-radius: 8px; }
   .btn.block { width: 100%; }
+  .btn.dashed { border-style: dashed; color: var(--green); font-weight: 700; background: transparent; }
   .btn:disabled { opacity: .6; cursor: progress; }
-  .linkbtn { background: none; border: 0; color: var(--ink-soft); text-decoration: underline; cursor: pointer; padding: 8px 0; font-size: .9rem; }
+  .linkbtn { background: none; border: 0; color: var(--green); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; padding: 10px 0; font-size: .875rem; min-height: 44px; }
 
   ul.list { list-style: none; margin: 0; padding: 0; }
-  ul.list li { display: flex; justify-content: space-between; gap: 10px; align-items: center;
-    padding: 12px 4px; border-bottom: 1px solid var(--line); }
+  ul.list li { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--line-soft); }
   ul.list li:last-child { border-bottom: 0; }
   ul.list .main { min-width: 0; flex: 1; }
-  ul.list .title { font-weight: 600; overflow-wrap: anywhere; }
+  ul.list .title { font-weight: 700; overflow-wrap: anywhere; }
   ul.list .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
   ul.list li.voided .title { text-decoration: line-through; color: var(--muted); }
+  ul.list li.day-h { display: block; padding: 18px 0 8px; font-size: .6875rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border-bottom: 0; }
+  ul.list li.day-h:first-child { padding-top: 0; }
+  .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 7px; background: #8FA89A; align-self: flex-start; }
+  .dot.factura { background: var(--green); } .dot.gasto { background: #B5651D; } .dot.compra { background: var(--brass); }
   @media (max-width: 560px) { ul.list li { flex-wrap: wrap; } ul.list .actions { width: 100%; justify-content: flex-start; } }
-  .empty { text-align: center; color: var(--ink-soft); padding: 28px 8px; display: block !important; }
-  .badge { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: .78rem; background: var(--panel); color: var(--ink-soft); white-space: nowrap; }
-  .badge.low, .badge.pendiente, .badge.anulada { background: #FBEEEC; color: var(--red); }
+  .empty { text-align: center; color: var(--muted); padding: 28px 8px; display: block !important; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .75rem; font-weight: 700; background: var(--line-soft); color: var(--ink-soft); white-space: nowrap; }
+  .badge.low, .badge.pendiente, .badge.anulada { background: #F8E6E3; color: #8E2C23; }
   .badge.abono { background: #FFF4DC; color: var(--amber); }
-  .badge.pagada { background: #E8F3EC; color: var(--green); }
-  .badge.devuelta { background: #EEF0F4; color: var(--ink-soft); }
+  .badge.pagada { background: var(--mint-soft); color: var(--green); }
+  .badge.devuelta { background: var(--line-soft); color: var(--ink-soft); }
+  .badge.admin { background: #F6ECD9; color: var(--brass); }
   .neg { color: var(--red) !important; }
   .pos { color: var(--green) !important; }
-  .badge.admin { background: #EEE8DA; color: var(--brass); }
 
-  .line-item { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 10px; background: #fff; }
-  .line-item .nums { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 8px; }
+  .line-item { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 12px; background: #FAFBF9; }
+  .line-item .nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   .line-item .nums label.f { margin-bottom: 0; }
-  .line-item .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
-  .money { font-family: ui-monospace, Consolas, monospace; }
-  .totals { background: var(--panel); border-radius: 8px; padding: 12px 16px; margin: 14px 0; }
-  .totals div { display: flex; justify-content: space-between; padding: 3px 0; gap: 12px; }
-  .totals .grand { font-weight: 700; font-size: 1.15rem; border-top: 1px solid var(--line); margin-top: 6px; padding-top: 8px; }
-  .errors { background: #FBEEEC; border: 1px solid #E7C3BE; color: #7A2E2E; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
+  .line-item .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-weight: 700; }
+  .money { font-family: var(--mono); }
+  .totals { background: var(--panel); border-radius: 12px; padding: 12px 16px; margin: 14px 0; }
+  .totals div { display: flex; justify-content: space-between; padding: 4px 0; gap: 12px; }
+  .totals .grand { font-weight: 800; font-size: 1.1rem; border-top: 1px solid var(--line); margin-top: 6px; padding-top: 10px; }
+  .totals .grand:only-child { border-top: 0; margin-top: 0; padding-top: 4px; }
+  .totals.result { background: var(--mint-soft); color: var(--forest); }
+  .totals.result .money { font-size: 1.4rem; }
+  .errors { background: #F8E6E3; border: 1px solid #E3B7B0; color: #7A2A22; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
   .errors ul { margin: 6px 0 0; padding-left: 18px; }
-  .note { background: var(--panel); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: .9rem; color: var(--ink-soft); }
-  .client-info { font-size: .9rem; color: var(--ink-soft); white-space: pre-line; margin: -4px 0 12px; }
+  .note { background: var(--panel); border: 1px solid var(--line-soft); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; font-size: .875rem; color: var(--ink-soft); line-height: 1.55; }
+  .client-info { font-size: .875rem; color: var(--muted); white-space: pre-line; margin: -4px 0 12px; }
   .logo-prev { max-width: 180px; max-height: 80px; display: block; margin: 6px 0 10px; }
-  fieldset.seg { padding: 0; min-inline-size: 0; }
-  .seg { display: flex; border: 1px solid var(--field); border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
-  .seg label { flex: 1; text-align: center; padding: 10px 6px; cursor: pointer; font-size: .95rem; min-height: 44px; position: relative; }
+  fieldset.seg { padding: 4px; min-inline-size: 0; }
+  .seg { display: flex; gap: 4px; border: 0; background: var(--track); border-radius: 12px; margin: 0 0 14px; }
+  .seg label { flex: 1; display: flex; align-items: center; justify-content: center; text-align: center; padding: 8px 6px; cursor: pointer;
+    font-size: .875rem; font-weight: 600; color: var(--ink-soft); min-height: 44px; border-radius: 9px; position: relative; }
   /* oculto a la vista pero no al teclado: Tab llega al grupo y las flechas cambian la opción */
   .seg input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
-  .seg label:has(input:focus-visible) { outline: 3px solid var(--gold); outline-offset: -3px; }
-  .seg label:has(input:checked) { background: var(--ink); color: #fff; font-weight: 600; }
+  .seg label:has(input:focus-visible) { outline: 3px solid var(--green); outline-offset: 1px; }
+  .seg label:has(input:checked) { background: var(--green); color: #fff; font-weight: 700; }
 
-  table.t { width: 100%; border-collapse: collapse; font-size: .92rem; }
-  table.t th { text-align: left; font-weight: 600; color: var(--ink-soft); font-size: .8rem; text-transform: uppercase;
-    letter-spacing: .03em; padding: 6px 4px; border-bottom: 1px solid var(--line); }
-  table.t td { padding: 8px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.t { width: 100%; border-collapse: collapse; font-size: .875rem; }
+  table.t th { text-align: left; font-weight: 700; color: var(--muted); font-size: .75rem; text-transform: uppercase;
+    letter-spacing: .06em; padding: 10px 8px; border-bottom: 1px solid var(--line); }
+  table.t td { padding: 11px 8px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  table.t th:first-child, table.t td:first-child { padding-left: 0; }
+  table.t th:last-child, table.t td:last-child { padding-right: 0; }
   table.t tr:last-child td { border-bottom: 0; }
   table.t .r { text-align: right; white-space: nowrap; }
 
+  /* pasos de la factura y panel de total */
+  .inv-layout { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+  .inv-main { flex: 999 1 480px; min-width: 0; }
+  .step-h { display: flex; align-items: center; gap: 10px; font-size: 1.0625rem; margin-bottom: 14px; }
+  .step-h .n { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--green); color: #fff; font-size: .8125rem;
+    display: inline-flex; align-items: center; justify-content: center; }
+  aside.summary { flex: 1 1 300px; position: sticky; top: 24px; background: var(--forest); color: #E7EEE9; border-radius: 16px; padding: 24px;
+    display: flex; flex-direction: column; gap: 16px; }
+  aside.summary .eyebrow { color: var(--sage); }
+  aside.summary .rows { display: flex; flex-direction: column; gap: 10px; font-size: .875rem; padding-bottom: 16px; border-bottom: 1px solid var(--forest-line); }
+  aside.summary .rows div { display: flex; justify-content: space-between; gap: 12px; }
+  aside.summary .lbl { font-size: .8125rem; color: var(--sage); }
+  aside.summary .amt { display: block; font-family: var(--mono); font-size: 2.5rem; font-weight: 700; letter-spacing: -.03em; color: #fff; line-height: 1.15; overflow-wrap: anywhere; }
+  aside.summary .btn.primary { min-height: 52px; border-radius: 12px; background: var(--mint); border-color: var(--mint); color: var(--forest); font-weight: 800; font-size: 1rem; }
+  aside.summary .btn.primary:hover { background: #fff; border-color: #fff; }
+  aside.summary .btn:focus-visible { outline-color: var(--mint); }
+
   /* resumen */
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
-  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; container-type: inline-size; min-width: 0; }
-  .tile .k { font-size: .8rem; color: var(--ink-soft); }
-  .tile .v { font-size: clamp(.9rem, 11.5cqi, 1.35rem); font-weight: 700; margin-top: 2px; font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
-  .tile .s { font-size: .8rem; color: var(--muted); margin-top: 2px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; container-type: inline-size; min-width: 0; }
+  .tile .k { font-size: .8125rem; font-weight: 600; color: var(--ink-soft); }
+  .tile .v { font-size: clamp(.95rem, 12cqi, 1.5rem); font-weight: 700; margin-top: 6px; font-family: var(--mono); white-space: nowrap; letter-spacing: -.02em; }
+  .tile .s { font-size: .75rem; color: var(--muted); margin-top: 6px; line-height: 1.4; }
   .chart { position: relative; }
   .chart svg { display: block; width: 100%; height: 220px; overflow: visible; }
   .chart .bar { fill: var(--bar); }
   .chart .hit:hover + .bar, .chart .bar.on { fill: var(--bar-hover); }
-  .chart .grid line { stroke: var(--line); stroke-width: 1; }
-  .chart text { fill: var(--muted); font-size: 11px; }
-  .chart .tip { position: absolute; pointer-events: none; background: var(--ink); color: #fff; border-radius: 6px;
+  .chart .grid line { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 3; }
+  .chart text { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+  .chart .tip { position: absolute; pointer-events: none; background: var(--forest); color: #fff; border-radius: 8px;
     padding: 6px 10px; font-size: .85rem; white-space: nowrap; transform: translate(-50%, -100%); margin-top: -8px; }
 
-  dialog { border: 0; border-radius: 12px; padding: 0; width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 40px); }
-  dialog::backdrop { background: #16233A88; }
-  dialog form { padding: 18px; }
-  dialog h2 { margin-bottom: 14px; }
-  dialog .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; flex-wrap: wrap; }
+  dialog { border: 0; border-radius: 16px; padding: 0; width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 40px); color: var(--ink); box-shadow: 0 20px 60px #10251b40; }
+  dialog::backdrop { background: #10251b8c; }
+  dialog form { padding: 22px 24px; }
+  dialog h2 { margin-bottom: 16px; font-size: 1.375rem; letter-spacing: -.02em; }
+  dialog .btns { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; flex-wrap: wrap; }
 
   #toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%);
-    background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 8px; max-width: calc(100vw - 32px);
-    box-shadow: 0 4px 16px #0003; z-index: 100; }
+    background: var(--forest); color: #fff; padding: 12px 18px; border-radius: 10px; max-width: calc(100vw - 32px);
+    box-shadow: 0 6px 20px #10251b40; z-index: 100; font-weight: 600; font-size: .9rem; }
   #toast.error { background: var(--red); }
 
-  #login { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
-  #login .card { width: 100%; max-width: 380px; }
-  #login h1 { margin-bottom: 4px; }
+  /* entrar */
+  #login { min-height: 100vh; display: flex; flex-wrap: wrap; }
+  .login-hero { flex: 1 1 420px; background: var(--forest); color: #E7EEE9; padding: 48px 56px; display: flex; flex-direction: column; justify-content: space-between; gap: 48px; }
+  .login-hero .brand { font-weight: 700; font-size: 1.125rem; }
+  .login-hero .logo { width: 40px; height: 40px; border-radius: 10px; }
+  .login-hero .eyebrow { color: var(--sage); margin-bottom: 16px; }
+  .login-hero .claim { margin: 0; font-size: 3.25rem; line-height: 1.05; font-weight: 800; letter-spacing: -.03em; max-width: 440px; }
+  .login-hero .foot { font-family: var(--mono); font-size: .8125rem; color: var(--sage); }
+  .login-side { flex: 999 1 480px; display: flex; align-items: center; justify-content: center; padding: 48px 24px; }
+  #login-form { width: 100%; max-width: 400px; }
+  #login-form h1 { font-size: 2rem; letter-spacing: -.02em; margin-bottom: 6px; }
+  #login-form > .muted { margin: 0 0 22px; font-size: .95rem; }
+  #login-form input { min-height: 48px; }
+  #login-form .btn.primary { min-height: 48px; font-size: .95rem; margin-top: 4px; }
+  #login-form hr { border: 0; border-top: 1px solid var(--line); margin: 20px 0 6px; }
 
   /* navegación inferior (celular) */
   nav.bottom { display: none; }
-  #more-btn { display: none; }
-  .action-bar { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-top: 14px;
-    box-shadow: 0 -4px 16px #16233a1a; }
-  .action-bar .lbl { font-size: .8rem; color: var(--ink-soft); }
-  .action-bar .amt { font-size: 1.25rem; font-weight: 700; font-family: ui-monospace, Consolas, monospace; }
-  details.more { margin: 4px 0 12px; }
-  details.more > summary { cursor: pointer; color: var(--ink-soft); padding: 10px 0; min-height: 44px; }
+  details.more { margin: 4px 0 12px; border-top: 1px solid var(--line-soft); padding-top: 4px; }
+  details.more > summary { cursor: pointer; color: var(--ink-soft); font-size: .875rem; font-weight: 600; padding: 10px 0; min-height: 44px; }
+  .more-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .more-grid .btn { justify-content: flex-start; min-height: 52px; border-color: var(--line); }
+  .more-grid .btn svg { width: 20px; height: 20px; color: var(--green); flex: none; }
+  .more-grid .btn.active { background: var(--mint-soft); border-color: var(--green); color: var(--forest); font-weight: 800; }
+
   @media (max-width: 759px) {
-    nav.tabs { display: none; }
-    header.top { padding-bottom: 10px; }
-    nav.bottom { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
-      background: var(--card); border-top: 1px solid var(--field); padding-bottom: env(safe-area-inset-bottom); }
-    nav.bottom button { background: none; border: 0; min-height: var(--nav-h); display: flex; flex-direction: column; align-items: center;
-      justify-content: center; gap: 2px; font-size: .72rem; color: var(--ink-soft); cursor: pointer; padding: 6px 2px; }
-    nav.bottom button svg { width: 24px; height: 24px; }
-    nav.bottom button.active { color: var(--ink); font-weight: 700; }
-    nav.bottom button.active svg { color: var(--brass); }
-    main { padding-bottom: calc(var(--nav-h) + 40px + env(safe-area-inset-bottom)); }
-    .action-bar { bottom: calc(var(--nav-h) + 8px + env(safe-area-inset-bottom)); }
+    nav.tabs, header.top .avatar, .brand .sub { display: none; }
+    header.top { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: calc(12px + env(safe-area-inset-top)) 16px 12px; }
+    header.top .logo { width: 32px; height: 32px; border-radius: 8px; font-size: .8125rem; }
+    header.top .who { flex: 0 1 auto; }
+    header.top #me { flex-direction: row; gap: 4px; align-items: center; color: var(--sage); min-height: 44px; }
+    header.top #me .nm { font-weight: 500; font-size: .8125rem; color: var(--sage); }
+    header.top #me .rl { font-size: .8125rem; }
+    header.top #me .rl::before { content: "· "; }
+    header.top #logout { min-height: 44px; }
+    #view { padding: 20px 16px calc(var(--nav-h) + 40px + env(safe-area-inset-bottom)); }
+    #view > .eyebrow + h2 { font-size: 1.625rem; }
+    #view > h2 + .muted { font-size: .8125rem; }
+    .card { padding: 14px; border-radius: 14px; }
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .tile { padding: 12px 14px; border-radius: 12px; }
+    .tile .v { font-size: clamp(.85rem, 13cqi, 1.25rem); }
+    .tiles .tile:first-child { grid-column: 1 / -1; background: var(--forest); border-color: var(--forest); color: #E7EEE9; padding: 18px; border-radius: 16px; }
+    .tiles .tile:first-child .k { color: var(--mint); }
+    .tiles .tile:first-child .v { color: #fff; font-size: clamp(1.2rem, 9cqi, 2.1rem); }
+    .tiles .tile:first-child .s { color: var(--sage); }
+    /* filtros: una sola fila que se desliza */
+    .chips { display: flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .chips::-webkit-scrollbar { display: none; }
+    .chip { flex: none; font-size: .8125rem; padding: 0 12px; }
+    /* listas: cada elemento es su propia tarjeta */
+    .card:has(> ul.list) { background: transparent; border: 0; padding: 0; }
+    ul.list li:not(.day-h):not(.empty) { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 10px; }
+    ul.list li.empty { background: #fff; border: 1px solid var(--line); border-radius: 14px; }
+    ul.list .actions .btn { flex: 1 1 auto; }
+    .inv-layout { display: block; }
+    aside.summary { position: sticky; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom)); top: auto; z-index: 5; margin: 0 -16px -16px;
+      border-radius: 0; flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; }
+    aside.summary .eyebrow, aside.summary .rows { display: none; }
+    aside.summary .amt { font-size: 1.5rem; }
+    aside.summary .btn.primary { min-height: 48px; padding: 0 18px; font-size: .9375rem; }
+    nav.bottom { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+      background: #fff; border-top: 1px solid var(--line); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); }
+    nav.bottom button { background: none; border: 0; border-radius: 10px; min-height: 52px; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 2px; font-size: .6875rem; font-weight: 600; color: var(--muted); cursor: pointer; padding: 4px 2px; }
+    nav.bottom button svg { width: 22px; height: 22px; }
+    nav.bottom button.active { color: var(--forest); font-weight: 800; background: var(--mint-soft); }
     #toast { bottom: calc(var(--nav-h) + 16px + env(safe-area-inset-bottom)); }
+    /* ventanas como hoja que sube desde abajo */
+    dialog { width: 100vw; max-width: 100vw; margin: auto 0 0; border-radius: 22px 22px 0 0; max-height: 92vh; }
+    dialog form { padding: 10px 20px calc(20px + env(safe-area-inset-bottom)); }
+    dialog form::before { content: ""; display: block; width: 40px; height: 4px; border-radius: 4px; background: #C9CFC8; margin: 0 auto 14px; }
+    dialog .btns { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+    dialog .btns .btn { min-height: 48px; border-radius: 12px; }
+    .login-hero { flex-basis: 100%; padding: 32px 24px 40px; gap: 32px; border-radius: 0 0 28px 28px; }
+    .login-hero .claim { font-size: 2rem; line-height: 1.1; }
+    .login-hero .foot { display: none; }
+    .login-side { padding: 28px 24px; align-items: flex-start; }
+    #login-form h1 { font-size: 1.625rem; }
   }
   /* pantallas táctiles: todo lo que se toca mide al menos 44 px */
   @media (pointer: coarse) {
     .btn.small, .chip, header.top .who button { min-height: 44px; }
   }
-  .more-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .more-grid .btn { justify-content: flex-start; }
-  .more-grid .btn.active { border-color: var(--ink); font-weight: 700; }
 </style>
 </head>
 <body>
 
 <main id="login" class="hidden">
-  <form class="card" id="login-form">
-    <h1>Facturador</h1>
+  <div class="login-hero">
+    <div class="brand"><span class="logo" aria-hidden="true">F</span><span>Facturador</span></div>
+    <div><div class="eyebrow">Facturador</div><p class="claim">Ventas, caja e inventario en un solo lugar.</p></div>
+    <div class="foot">FAC · COM · CAJA</div>
+  </div>
+  <div class="login-side">
+  <form id="login-form">
+    <h1>Entrar</h1>
     <p class="muted" id="login-hint">Entra con tu usuario y contraseña.</p>
     <label class="f" id="login-user-wrap"><span>Usuario</span>
       <input id="login-user" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
@@ -190,17 +309,19 @@
       <input type="password" id="login-pass" autocomplete="current-password" required></label>
     <div id="login-error" class="errors hidden" role="alert"></div>
     <button class="btn primary block" type="submit">Entrar</button>
+    <hr>
     <button class="linkbtn" type="button" id="login-mode">Entrar con la clave maestra (dueño)</button>
   </form>
+  </div>
 </main>
 
 <div id="app" class="hidden">
   <header class="top">
-    <div class="row">
-      <h1 id="company-title">Facturador</h1>
-      <div class="who"><button id="me" title="Mi cuenta"></button><button id="logout">Salir</button></div>
-    </div>
+    <div class="brand"><span class="logo" id="brand-logo" aria-hidden="true">F</span>
+      <span class="bn"><h1 id="company-title">Facturador</h1><span class="sub">Facturador</span></span></div>
     <nav class="tabs" id="tabs" aria-label="Secciones"></nav>
+    <div class="who"><span class="avatar" id="avatar" aria-hidden="true"></span>
+      <button id="me" title="Cambiar mi contraseña"></button><button id="logout">Salir</button></div>
   </header>
   <main id="view"></main>
   <nav class="bottom" id="bottom-nav" aria-label="Secciones"></nav>
@@ -422,9 +543,13 @@ async function startApp() {
   storageSet(auth);
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  $("#me").textContent = `${auth.user.name}${isAdmin() ? " · admin" : ""}`;
-  $("#tabs").innerHTML = ALL_TABS.filter(([, , adminOnly]) => !adminOnly || isAdmin())
-    .map(([key, label]) => `<button data-tab="${key}">${esc(label)}</button>`).join("");
+  $("#me").innerHTML = `<span class="nm">${esc(auth.user.name)}</span><span class="rl">${isAdmin() ? "admin" : "vendedor"}</span>`;
+  $("#avatar").textContent = initials(auth.user.name);
+  $("#tabs").innerHTML = TAB_GROUPS.map(([g, label]) => {
+    const tabs = visibleTabs().filter(([k]) => TAB_GROUP[k] === g);
+    return tabs.length ? `<div class="grp"><div class="grp-l" aria-hidden="true">${label}</div>${tabs.map(([key, l]) =>
+      `<button data-tab="${key}">${icon(key)}<span>${esc(l)}</span></button>`).join("")}</div>` : "";
+  }).join("");
   renderBottomNav();
   await loadCompany();
   go(currentTab && (isAdmin() || !ALL_TABS.find((t) => t[0] === currentTab)[2]) ? currentTab : (isAdmin() ? "resumen" : "factura"));
@@ -433,6 +558,7 @@ async function startApp() {
 async function loadCompany() {
   company = await api("GET", "api/company");
   $("#company-title").textContent = company.name || "Facturador";
+  $("#brand-logo").textContent = initials(company.name || "Facturador");
   document.title = company.name ? `${company.name} · Facturador` : "Facturador";
 }
 
@@ -443,13 +569,26 @@ $("#tabs").addEventListener("click", (ev) => { const t = ev.target.closest("butt
 // En el celular: barra inferior con lo más usado y "Más" para el resto de pestañas.
 const BOTTOM_TABS = [["factura", "Facturar"], ["historial", "Historial"], ["caja", "Caja"], ["clientes", "Clientes"]];
 const ICONS = {
-  factura: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
-  historial: '<path d="M4 6h16M4 12h16M4 18h10"/>',
-  caja: '<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/>',
-  clientes: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14.8c1.6.9 2.7 2.6 3 5.2"/>',
-  mas: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  resumen: "M4 19V11M10 19V5M16 19v-6M3 19h18",
+  factura: "M14 3H6v18h12V7zM14 3v4h4M12 11v6M9 14h6",
+  historial: "M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01",
+  caja: "M3 7h18v10H3zM12 9.5a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5",
+  clientes: "M16 20v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 11a4 4 0 1 0 0-8a4 4 0 0 0 0 8M22 20v-1a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8",
+  productos: "M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8",
+  compras: "M3 4h2l2.4 11h11.2L21 7H6.2M9 20h.01M18 20h.01",
+  proveedores: "M2 6h12v10H2zM14 9h4l4 4v3h-8M6 19a2 2 0 1 0 0-4a2 2 0 0 0 0 4M18 19a2 2 0 1 0 0-4a2 2 0 0 0 0 4",
+  gastos: "M12 3v14M6 11l6 6 6-6M4 21h16",
+  empresa: "M4 21V5l8-3v19M12 9h8v12M8 8h.01M8 12h.01M8 16h.01M16 13h.01M16 17h.01M2 21h20",
+  usuarios: "M12 11a4 4 0 1 0 0-8a4 4 0 0 0 0 8M4 21v-1a6 6 0 0 1 12 0v1M17 11l2 2 4-4",
+  actividad: "M3 12h4l3-8 4 16 3-8h4",
+  mas: "M5 12h.01M12 12h.01M19 12h.01",
 };
-const icon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[k]}</svg>`;
+// Menú lateral (computador): pestañas agrupadas; el nombre del grupo también va sobre el título de cada pantalla.
+const TAB_GROUPS = [["ventas", "Ventas"], ["operacion", "Operación"], ["admin", "Administración"]];
+const TAB_GROUP = { resumen: "ventas", factura: "ventas", historial: "ventas", caja: "ventas", clientes: "operacion", productos: "operacion",
+  compras: "operacion", proveedores: "operacion", gastos: "operacion", empresa: "admin", usuarios: "admin", actividad: "admin" };
+const initials = (name) => String(name || "").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "F";
+const icon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${ICONS[k]}"/></svg>`;
 const visibleTabs = () => ALL_TABS.filter(([, , adminOnly]) => !adminOnly || isAdmin());
 
 function renderBottomNav() {
@@ -462,9 +601,9 @@ $("#bottom-nav").addEventListener("click", (ev) => {
   if (b.dataset.tab) return go(b.dataset.tab);
   const main = BOTTOM_TABS.map(([k]) => k);
   showDialog(`<h2>Más secciones</h2><div class="more-grid">${visibleTabs().filter(([k]) => !main.includes(k)).map(([k, l]) =>
-      `<button type="button" class="btn ${k === currentTab ? "active" : ""}" data-go="${k}">${esc(l)}</button>`).join("")}</div>
+      `<button type="button" class="btn ${k === currentTab ? "active" : ""}" data-go="${k}" ${k === currentTab ? 'aria-current="page"' : ""}>${icon(k)}<span>${esc(l)}</span></button>`).join("")}</div>
     <div class="btns" style="margin-top:14px"><button class="btn" value="close">Cerrar</button></div>`, (form, dlg) => {
-    form.onclick = async (e) => { const k = e.target.dataset.go; if (k) { await closeModal(dlg); go(k); } };
+    form.onclick = async (e) => { const k = e.target.closest("[data-go]")?.dataset.go; if (k) { await closeModal(dlg); go(k); } };
   });
 });
 
@@ -482,7 +621,11 @@ async function go(tab) {
   const view = $("#view");
   view.innerHTML = `<p class="muted">Cargando…</p>`;
   window.scrollTo(0, 0);
-  try { await views[tab](view); }
+  try {
+    await views[tab](view);
+    const h = view.firstElementChild;
+    if (h?.tagName === "H2") h.insertAdjacentHTML("beforebegin", `<div class="eyebrow">${TAB_GROUPS.find(([g]) => g === TAB_GROUP[tab])[1]}</div>`);
+  }
   catch (e) { view.innerHTML = `<div class="errors">${esc(e.message)}</div>`; }
 }
 
@@ -1256,7 +1399,7 @@ views.caja = async (view) => {
         ${PAYMENT_METHODS.map(([m, l]) => { const dif = (closed.counted[m] || 0) - (closed.expected[m] || 0);
           return `<tr><td>${l}</td><td class="r money">${esc(money(closed.expected[m]))}</td><td class="r money">${esc(money(closed.counted[m]))}</td>
             <td class="r money ${dif < 0 ? "neg" : dif > 0 ? "pos" : ""}">${esc(money(dif))}</td></tr>`; }).join("")}</tbody></table>
-      <div class="totals"><div class="grand"><span>${closed.difference === 0 ? "Cuadró" : closed.difference > 0 ? "Sobró" : "Faltó"}</span>
+      <div class="totals result"><div class="grand"><span>${closed.difference === 0 ? "Cuadró" : closed.difference > 0 ? "Sobró" : "Faltó"}</span>
         <span class="money">${esc(money(Math.abs(closed.difference)))}</span></div></div>
       ${closed.notes ? `<p class="muted">Notas: ${esc(closed.notes)}</p>` : ""}
       ${admin ? `<button class="btn small danger" id="reopen">Borrar este cierre (para repetirlo)</button>` : ""}</div>`
@@ -1265,7 +1408,7 @@ views.caja = async (view) => {
       <table class="t"><thead><tr><th><span class="sr-only">Método</span></th><th class="r">Esperado</th><th class="r" style="width:42%">Contado</th></tr></thead><tbody>
         ${PAYMENT_METHODS.map(([m, l]) => `<tr><td>${l}</td><td class="r money" data-exp="${m}"></td>
           <td class="r"><input name="c_${m}" type="number" step="any" inputmode="decimal" placeholder="0" style="text-align:right"></td></tr>`).join("")}</tbody></table>
-      <div class="totals"><div class="grand"><span id="dif-label">Diferencia</span><span class="money" id="dif"></span></div></div>
+      <div class="totals result"><div class="grand"><span id="dif-label">Diferencia</span><span class="money" id="dif"></span></div></div>
       <label class="f"><span>Notas (opcional)</span><input name="notes" placeholder="ej. se pagó un domicilio con la caja"></label>
       <div id="err" class="errors hidden" role="alert"></div>
       <button class="btn primary block" type="submit">Guardar cierre de caja</button></form>`}
@@ -1445,9 +1588,17 @@ views.actividad = async (view) => {
     const before = append && items.length ? `&before=${items[items.length - 1].created_at}` : "";
     const rows = await api("GET", `api/activity?limit=100${before}&q=${encodeURIComponent(q)}&entity=${encodeURIComponent(actividadEntity)}`);
     items = append ? items.concat(rows) : rows;
-    $("#list", view).innerHTML = items.length ? items.map((a) => `<li><div class="main">
-      <div>${esc(a.summary)}</div><div class="muted" style="font-size:.85rem">${esc(fmtDateTime(a.created_at))} · ${esc(a.user_name || "—")}</div></div></li>`).join("")
-      : `<li class="empty">Sin movimientos.</li>`;
+    // Agrupada por día, con la hora y el tipo de cada movimiento.
+    let lastDay = "";
+    $("#list", view).innerHTML = items.length ? items.map((a) => {
+      const d = new Date(a.created_at * 1000);
+      const day = d.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+      const head = day !== lastDay ? `<li class="day-h">${esc(day)}</li>` : "";
+      lastDay = day;
+      return `${head}<li><span class="dot ${esc(a.entity)}" aria-hidden="true"></span><div class="main">
+      <div>${esc(a.summary)}</div><div class="muted" style="font-size:.8rem"><span class="money">${esc(d.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" }))}</span>
+      · ${esc(ENTITY_LABEL[a.entity] || a.entity)} · ${esc(a.user_name || "—")}</div></div></li>`;
+    }).join("") : `<li class="empty">Sin movimientos.</li>`;
     $("#more", view).classList.toggle("hidden", rows.length < 100);
   };
   $("input[type=search]", view).oninput = (ev) => { clearTimeout(timer); timer = setTimeout(() => { q = ev.target.value.trim(); guarded(() => load(false)); }, 300); };
@@ -1663,24 +1814,20 @@ views.factura = async (view) => {
   view.innerHTML = `<h2>Nueva factura</h2>
     <p class="muted">Los artículos se eligen desde tu catálogo, para llevar el inventario al día.</p>
     <div id="errors" class="errors hidden" role="alert"></div>
-    <div class="card">
+    <div class="inv-layout"><div class="inv-main">
+    <section class="card" aria-labelledby="st-1">
+      <h3 class="step-h" id="st-1"><span class="n" aria-hidden="true">1</span>Cliente</h3>
       <label class="f"><span>Cliente *</span><select id="client"></select></label>
       <div class="client-info" id="client-info"></div>
-      <button class="btn small" id="new-client">+ Nuevo cliente</button>
-    </div>
-    <div class="card">
-      <div class="muted" style="margin-bottom:8px">Artículos</div>
+      <button class="btn" id="new-client">+ Nuevo cliente</button>
+    </section>
+    <section class="card" aria-labelledby="st-2">
+      <h3 class="step-h" id="st-2"><span class="n" aria-hidden="true">2</span>Artículos</h3>
       <div id="lines"></div>
-      <button class="btn" id="add-line">+ Añadir artículo</button>
-    </div>
-    <div class="card">
-      <div class="totals" style="margin-top:0">
-        <div id="row-disc" class="hidden"><span>Descuentos</span><span class="money" id="t-disc"></span></div>
-        <div><span>Subtotal (sin ${esc(taxLabel)})</span><span class="money" id="t-base"></span></div>
-        <div><span id="t-tax-label">${esc(taxLabel)} incluido</span><span class="money" id="t-tax"></span></div>
-        <div class="grand"><span>Total a pagar</span><span class="money" id="t-total"></span></div>
-      </div>
-      <div class="muted" style="margin-bottom:6px">Forma de pago</div>
+      <button class="btn dashed" id="add-line">+ Añadir artículo</button>
+    </section>
+    <section class="card" aria-labelledby="st-3">
+      <h3 class="step-h" id="st-3"><span class="n" aria-hidden="true">3</span>Forma de pago</h3>
       <fieldset class="seg"><legend class="sr-only">Forma de pago</legend><label><input type="radio" name="paymode" value="contado" checked>Pagada ahora</label>
         <label><input type="radio" name="paymode" value="credito">A crédito</label></fieldset>
       <div class="grid2">
@@ -1694,11 +1841,18 @@ views.factura = async (view) => {
           <label class="f"><span>Notas (opcional)</span><input id="notes" placeholder="Condiciones de pago, etc."></label>
           <label class="f"><span>Garantía (opcional)</span><input id="warranty" placeholder="ej. 6 meses por defectos de fábrica"></label>
         </div></details>
+    </section>
     </div>
-    <div class="action-bar">
-      <div><div class="lbl">Total a pagar</div><div class="amt" id="bar-total" aria-live="polite"></div></div>
+    <aside class="summary" aria-label="Resumen de la factura">
+      <div class="eyebrow">Resumen de la factura</div>
+      <div class="rows">
+        <div id="row-disc" class="hidden"><span>Descuentos</span><span class="money" id="t-disc"></span></div>
+        <div><span>Subtotal (sin ${esc(taxLabel)})</span><span class="money" id="t-base"></span></div>
+        <div><span id="t-tax-label">${esc(taxLabel)} incluido</span><span class="money" id="t-tax"></span></div>
+      </div>
+      <div><span class="lbl">Total a pagar</span><span class="amt" id="bar-total" aria-live="polite"></span></div>
       <button class="btn primary" id="generate">Generar factura</button>
-    </div>`;
+    </aside></div>`;
 
   let currentTotal = 0;
   const payMode = () => $("input[name=paymode]:checked", view).value;
@@ -1756,7 +1910,6 @@ views.factura = async (view) => {
     $("#t-base", view).textContent = money(base);
     $("#t-tax-label", view).textContent = `${taxLabel} (${fmtNum(rate)}%) incluido`;
     $("#t-tax", view).textContent = money(total - base);
-    $("#t-total", view).textContent = money(total);
   };
 
   const addLine = () => { state.lines.push({ productId: "", qty: "1", price: "", discount: "0" }); renderLines(); };
