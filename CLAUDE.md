@@ -15,11 +15,13 @@ su código está en el historial de git (commit `abf58e9`) por si se vuelve a in
   antes de `innerHTML`. Diálogos con `openForm()` (formularios) y `showDialog()` (contenido libre); para
   encadenar un diálogo tras otro usar `await closeModal(dlg)`, no `dlg.close()`.
 - **Interfaz**: dinero siempre con `money()` (web) / `fmt_money()` y `fmt()` (servidor/PDF), en formato colombiano:
-  `$ 245.000`, `-$ 759.000`, centavos con coma solo si los hay. Estilo "verde bosque" (tokens en `:root`: `--forest`,
-  `--green`, `--mint`…; letra Manrope y cifras en JetBrains Mono, de Google Fonts). En el celular (< 760 px) la
-  navegación es la barra inferior (`BOTTOM_TABS` + "Más") y las ventanas salen como hoja desde abajo; en el computador,
-  el menú lateral agrupado (`TAB_GROUPS`/`TAB_GROUP`, cuyo nombre `go()` pone encima del `<h2>` de cada pantalla).
-  Nueva factura: pasos numerados y panel oscuro `aside.summary` con el total (barra fija en el celular). Accesibilidad (WCAG 2.1 AA, revisada
+  `$ 245.000`, `-$ 759.000`, centavos con coma solo si los hay. Estilo G "Tablet de mostrador" (tokens en `:root`: `--ciruela`,
+  `--durazno`, `--menta`, `--lila`…; letra Lexend de Google Fonts; tarjetas `.ficha`). En el celular (< 760 px) la
+  navegación es la barra flotante inferior (`BOTTOM_TABS` + "Más") y las ventanas salen como hoja desde abajo; en la
+  tablet (760–1099 px) el menú lateral queda solo con íconos (cada botón con `aria-label`); en el computador, el menú
+  lateral agrupado (`TAB_GROUPS`/`TAB_GROUP`) y las ventanas entran como panel por la derecha. Nueva factura: panel
+  `aside.summary` con el total (tarjeta flotante en el celular) y calculadora de cambio en efectivo (no se guarda);
+  F2 abre una factura nueva. Accesibilidad (WCAG 2.1 AA, revisada
   con axe-core sin hallazgos): todo campo con `<label>` o `aria-label`, bordes de campos/botones con `--field`
   (contraste ≥ 3:1), texto gris con `--muted` (≥ 4.5:1), objetivos táctiles ≥ 44 px, cajas de error con
   `role="alert"`, opciones tipo segmento como radios en `<fieldset>` (alcanzables con teclado), sin `display:none`
